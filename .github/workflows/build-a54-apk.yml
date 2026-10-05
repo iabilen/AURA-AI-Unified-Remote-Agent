@@ -9,7 +9,6 @@ on:
 concurrency:
   group: aura-verify-${{ github.ref }}
   cancel-in-progress: true
-env:
 jobs:
   build:
     runs-on: ubuntu-24.04
