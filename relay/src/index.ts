@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { DurableEventStore } from "./event-store.js";
+import { DeviceRegistry } from "./device-registry.js";
 import { WebSocketServer, WebSocket } from "ws";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
@@ -12,14 +13,16 @@ type PendingTask = { resolve: (value: JsonRecord) => void; timer: NodeJS.Timeout
 
 const PORT = Number(process.env.PORT ?? 8787);
 const MCP_TOKEN = process.env.AURA_MCP_TOKEN ?? "";
-const DEVICE_TOKENS = loadDeviceTokens();
+const CONFIGURED_DEVICE_TOKENS = loadDeviceTokens();
 const EVENT_LIMIT = 200;
 const EVENT_STORE_PATH = process.env.AURA_EVENT_STORE_PATH ?? "./data/events.json";
+const DEVICE_REGISTRY_PATH = process.env.AURA_DEVICE_REGISTRY_PATH ?? "./data/devices.json";
 const TASK_TIMEOUT_MS = 60_000;
 
 if (MCP_TOKEN.length < 24) throw new Error("AURA_MCP_TOKEN must be at least 24 characters");
-if (Object.keys(DEVICE_TOKENS).length === 0) throw new Error("AURA_DEVICE_TOKENS must contain at least one device token");
+if (Object.keys(CONFIGURED_DEVICE_TOKENS).length === 0) throw new Error("AURA_DEVICE_TOKENS must contain at least one device token");
 
+const deviceRegistry = new DeviceRegistry(DEVICE_REGISTRY_PATH, CONFIGURED_DEVICE_TOKENS);
 const devices = new Map<string, Device>();
 const eventStore = new DurableEventStore(EVENT_STORE_PATH, EVENT_LIMIT);
 const pendingTasks = new Map<string, PendingTask>();
@@ -38,18 +41,10 @@ function loadDeviceTokens(): Record<string, string> {
   }
 }
 
-function safeEqual(a: string, b: string): boolean {
-  const aa = Buffer.from(a);
-  const bb = Buffer.from(b);
-  return aa.length === bb.length && timingSafeEqual(aa, bb);
-}
-
 function bearer(req: { headers: Record<string, string | string[] | undefined> }): string {
   const raw = req.headers.authorization;
   return typeof raw === "string" && raw.startsWith("Bearer ") ? raw.slice(7) : "";
 }
-
-function deviceTokenFor(id: string): string | undefined { return DEVICE_TOKENS[id] ?? DEVICE_TOKENS["*"]; }
 
 function rememberEvent(event: JsonRecord, deviceId: string): string {
   const id = typeof event.id === "string" ? event.id : randomUUID();
@@ -86,9 +81,33 @@ function buildMcpServer(): McpServer {
     description: "List authorized AURA devices and their current connection state.",
     inputSchema: z.object({}),
   }, async () => ({ content: [{ type: "text", text: JSON.stringify({
-    configured: Object.keys(DEVICE_TOKENS).filter((id) => id !== "*"),
+    configured: deviceRegistry.configuredIds(),
+    revoked: deviceRegistry.configuredIds().filter((id) => deviceRegistry.isRevoked(id)),
     connected: [...devices.values()].map((device) => ({ deviceId: device.id, connected: device.socket.readyState === WebSocket.OPEN, connectedAt: device.connectedAt, lastSeenAt: device.lastSeenAt })),
   }) }] }));
+
+  server.registerTool("aura_revoke_device", {
+    description: "Revoke a configured AURA device so it can no longer establish a bridge connection until restored.",
+    inputSchema: z.object({ deviceId: z.string().min(1) }),
+  }, async ({ deviceId }) => {
+    if (!deviceRegistry.revoke(deviceId)) {
+      return { content: [{ type: "text", text: JSON.stringify({ deviceId, status: "not_configured" }) }], isError: true };
+    }
+    const device = devices.get(deviceId);
+    if (device?.socket.readyState === WebSocket.OPEN) device.socket.close(4003, "revoked");
+    devices.delete(deviceId);
+    return { content: [{ type: "text", text: JSON.stringify({ deviceId, status: "revoked" }) }] };
+  });
+
+  server.registerTool("aura_restore_device", {
+    description: "Restore a previously revoked configured AURA device.",
+    inputSchema: z.object({ deviceId: z.string().min(1) }),
+  }, async ({ deviceId }) => {
+    if (!deviceRegistry.restore(deviceId)) {
+      return { content: [{ type: "text", text: JSON.stringify({ deviceId, status: "not_revoked_or_not_configured" }) }], isError: true };
+    }
+    return { content: [{ type: "text", text: JSON.stringify({ deviceId, status: "restored" }) }] };
+  });
 
   server.registerTool("aura_status", {
     description: "Get the status of one connected AURA device.",
@@ -138,7 +157,9 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (url.pathname !== "/mcp") { res.writeHead(404); res.end("not found"); return; }
-  if (!safeEqual(bearer(req), MCP_TOKEN)) {
+  const mcpBearer = Buffer.from(bearer(req));
+  const mcpExpected = Buffer.from(MCP_TOKEN);
+  if (mcpBearer.length !== mcpExpected.length || !timingSafeEqual(mcpBearer, mcpExpected)) {
     res.writeHead(401, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "unauthorized" }));
     return;
@@ -151,7 +172,7 @@ server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "/", "http://aura.local");
   if (url.pathname !== "/device") { socket.destroy(); return; }
   const deviceId = req.headers["x-aura-device"];
-  if (typeof deviceId !== "string" || !safeEqual(bearer(req), deviceTokenFor(deviceId) ?? "")) {
+  if (typeof deviceId !== "string" || !deviceRegistry.isAuthorized(deviceId, bearer(req))) {
     socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n"); socket.destroy(); return;
   }
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req, deviceId));

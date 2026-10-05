@@ -25,7 +25,7 @@
 - External backup is ChatGPT-side support; it is not automatic runtime sync into AURA.
 
 ## Immediate next priorities
-1. Pairing + revoke + device identity lifecycle.
+1. Pairing/enrollment + device credential issuance/rotation.
 2. Foreground/persistent bridge lifecycle with battery-aware behavior.
 3. Event adapters (SMS, calls, calendar, battery, connectivity, boot).
 4. Event filtering/privacy policy before forwarding sensitive content.

@@ -25,7 +25,7 @@ GitHub, Hjarni, Cortex, and other external stores are **ChatGPT-side engineering
 ## Current verified architecture
 Android events wake a lightweight AURA layer. Meaningful events can be normalized, filtered, persisted in a bounded queue when needed, and forwarded through the authenticated outbound WebSocket device channel to the relay. The relay exposes MCP tools for device discovery/status/events/task dispatch. Task IDs are preserved through the bridge into `Brain.run()` and returned in results.
 
-The relay MCP side is intentionally stateless regarding durable device identity for now. Recent device events are held in memory. Production hardening must add durable storage, explicit pairing/revocation, and multi-device routing without weakening authentication.
+The relay now persists device revocation state separately from environment-supplied bearer credentials. A revoked device is rejected at WebSocket upgrade and active sessions are closed. Pairing/enrollment and multi-device routing remain later hardening steps. Recent device events remain bounded and file-backed.
 
 ## Security invariants
 - No unauthenticated remote-control port.
