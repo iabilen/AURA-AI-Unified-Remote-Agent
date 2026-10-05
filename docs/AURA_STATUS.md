@@ -181,7 +181,11 @@ The user approved simplifying AURA around the original Brain and explicitly requ
 - No APK is built/replaced without explicit user request.
 
 ### Process state
-This is the written design/spec requested by the user. Implementation has not started. The next formal gate is review/approval of this written spec; after approval, create the detailed implementation plan and only then select the execution method before code changes.
+The user approved the written single-Brain + OpenAI/ChatGPT design. The detailed implementation plan is now recorded at `docs/superpowers/plans/2026-10-05-single-brain-openai.md`. Implementation code changes have not started yet.
+
+The next execution gate is implementation of that plan on `aura/pre-device-hardening-plan`; APK generation remains explicitly out of scope until the user requests it.
 
 ## Change log
 - 2026-10-05 18:24 UTC / 21:24 Türkiye: user approved the single-Brain direction, requested removal of Gemma and integration of OpenAI/ChatGPT as the single external AI path, and asked for the plan to be recorded.
+
+- 2026-10-05 18:31 UTC / 21:31 Türkiye: detailed implementation plan created at `docs/superpowers/plans/2026-10-05-single-brain-openai.md` after user approval. Plan preserves Brain, removes Gemma/local inference, integrates OpenAI at the existing provider boundary, and keeps APK generation gated.
