@@ -17,6 +17,13 @@
 - Device connectivity is outbound-only and authenticated with bearer tokens.
 - Relay currently keeps recent device events in memory; durable server storage/pairing/revocation is a later hardening step.
 
+## Runtime memory boundary — verified
+- AURA continuity memory is **offline and device-local** in app-private storage.
+- This local memory is the **only runtime memory source AURA depends on**.
+- AURA does **not** contact GitHub, Hjarni, Cortex, Dropbox, or other external memory/backup systems.
+- ChatGPT may consume continuity context through the normal AURA communication path and may back it up externally when useful.
+- External backup is ChatGPT-side support; it is not automatic runtime sync into AURA.
+
 ## Immediate next priorities
 1. Pairing + revoke + device identity lifecycle.
 2. Foreground/persistent bridge lifecycle with battery-aware behavior.
@@ -30,8 +37,8 @@
 When starting a new session, read this file first, then `AURA_MEMORY.md` and `AURA_EVENT_JOURNAL.md`, verify code state against GitHub `main`, and only then continue implementation.
 
 ## Source authority
-1. AURA runtime memory: active device state.
-2. GitHub: code, commits, branches, CI, and project docs.
-3. Cortex: durable project decisions.
-4. Hjarni: structured working notes.
-5. Dropbox `z 01 ai-db`: user-owned AI reference/archive.
+1. **AURA local runtime memory** — sole AURA runtime continuity source.
+2. **GitHub** — code, commits, branches, CI, and engineering snapshot/backup.
+3. **Cortex** — ChatGPT-side durable project decisions/backup.
+4. **Hjarni** — ChatGPT-side structured working notes/backup.
+5. **Dropbox `z 01 ai-db`** — ChatGPT-side user-owned AI reference/archive.

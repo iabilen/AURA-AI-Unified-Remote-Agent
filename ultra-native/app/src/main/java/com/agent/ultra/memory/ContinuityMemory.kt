@@ -8,12 +8,15 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Device-local continuity layer for AURA.
+ * Offline, device-local continuity layer for AURA.
  *
- * Git-tracked AURA_CONTEXT_SHORT.md / AURA_MEMORY.md / AURA_EVENT_JOURNAL.md
- * remain the project source of truth. This class keeps a bounded, mutable copy
- * in app-private storage so continuity survives process death and chat/session
- * boundaries without writing secrets or raw user requests to disk.
+ * Runtime state lives only in app-private Android storage. Git-tracked continuity
+ * documents are engineering/source material used to seed a fresh local store;
+ * they are not a live runtime dependency. AURA must never contact GitHub, Hjarni,
+ * Cortex, Dropbox, or another external memory service from the runtime memory layer.
+ * ChatGPT may receive bounded continuity context through the normal AURA path and
+ * may independently back up relevant state externally. External backups are not
+ * synchronization inputs to AURA.
  */
 class ContinuityMemory(context: Context) {
     private val root = File(context.filesDir, "aura-continuity")
@@ -77,7 +80,9 @@ class ContinuityMemory(context: Context) {
 - Gemma 3 1B is optional local fallback/continuity support, not the primary decision engine.
 - Device layer: Android events → AURA Event Bus → authenticated outbound relay/device channel → ChatGPT MCP → Brain.run().
 - Remote control remains authenticated and subject to the existing safety gate.
-- Runtime continuity is device-local; project truth remains Git-tracked in the repository.
+- Runtime continuity is offline and device-local; this local store is AURA's only runtime memory source.
+- AURA does not contact GitHub, Hjarni, Cortex, Dropbox, or other external memory/backup services.
+- ChatGPT may consume bounded local continuity context through the normal AURA path and may back it up externally; external backup is not synced back into AURA automatically.
 - Next priorities: pairing/revocation/device identity, persistent bridge lifecycle, event adapters/privacy filtering, camera/screen tools, durable relay storage/multi-device routing.
 """
         private const val LONG_SEED = """# AURA Memory — LONG

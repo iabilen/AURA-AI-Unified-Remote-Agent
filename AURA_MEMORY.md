@@ -12,13 +12,15 @@
 - Preserve the existing Ultra Agent working core until equivalence is proven by tests.
 
 ## Memory model
-AURA continuity is intentionally external to any single ChatGPT conversation:
+AURA has its own **offline, device-local continuity memory**. This is the only memory source AURA itself depends on at runtime.
 
 - SHORT — current state and next action.
 - LONG — durable architecture decisions and stable project knowledge.
 - EVENT JOURNAL — chronological implementation events, decisions, tests, failures, and releases.
 
-The files in this repository are the Git-tracked canonical project-memory layer. Runtime/device-local memory may later mirror the relevant subset for offline continuity.
+The mutable runtime copy lives in app-private Android storage and must remain usable without GitHub, Hjarni, Cortex, Dropbox, or any other external memory service. AURA must never contact those services to read, write, synchronize, or bootstrap runtime memory.
+
+GitHub, Hjarni, Cortex, and other external stores are **ChatGPT-side engineering/backup resources only**. ChatGPT may consume AURA's locally exposed continuity context through the normal AURA communication path and may choose to back up relevant memory externally. External backups must never become a runtime dependency or automatic sync source for AURA.
 
 ## Current verified architecture
 Android events wake a lightweight AURA layer. Meaningful events can be normalized, filtered, persisted in a bounded queue when needed, and forwarded through the authenticated outbound WebSocket device channel to the relay. The relay exposes MCP tools for device discovery/status/events/task dispatch. Task IDs are preserved through the bridge into `Brain.run()` and returned in results.
@@ -37,8 +39,9 @@ The relay MCP side is intentionally stateless regarding durable device identity 
 ## New-session procedure
 1. Read `AURA_CONTEXT_SHORT.md`.
 2. Read the latest entries in `AURA_EVENT_JOURNAL.md`.
-3. Verify the current GitHub `main` HEAD and relevant files.
-4. Compare against Cortex/Hjarni continuity records when decisions or history matter.
-5. State the exact last verified implementation point before changing code.
-6. Implement the smallest testable next step.
-7. Append the result to the event journal and update SHORT if the active state changed.
+3. Treat the device-local AURA memory as the runtime continuity source.
+4. Verify the current GitHub code/CI when implementation state matters; GitHub is an engineering source, not an AURA runtime dependency.
+5. Consult Cortex/Hjarni continuity records only as ChatGPT-side backup/history when decisions or history matter.
+6. State the exact last verified implementation point before changing code.
+7. Implement the smallest testable next step.
+8. Append the result to the event journal and update SHORT if the active state changed.
