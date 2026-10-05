@@ -120,11 +120,13 @@ class AuraBridgeClient(
 
     fun isConnected(): Boolean = socket != null
 
-    /** Sends immediately when connected; otherwise persists the event for the next session. */
+    /**
+     * Persists first, then attempts immediate delivery. The relay ACK is the
+     * only operation allowed to remove the event from durable local storage.
+     */
     fun sendEvent(event: AuraEvent): Boolean {
-        val sent = socket?.send(event.toWireJson()) == true
-        if (!sent) queue.enqueue(event)
-        return sent
+        queue.enqueue(event)
+        return socket?.send(event.toWireJson()) == true
     }
 
     fun sendStatus(): Boolean {

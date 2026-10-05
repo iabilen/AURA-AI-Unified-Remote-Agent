@@ -101,7 +101,12 @@ class AuraEventQueue(context: Context) {
     }
 
     private fun save(value: JSONArray) {
-        prefs.edit().putString(KEY, value.toString()).apply()
+        // commit() makes enqueue/ack durable before the caller can proceed. This
+        // queue is tiny and bounded, so the stronger persistence guarantee wins
+        // over SharedPreferences.apply()'s deferred write semantics.
+        check(prefs.edit().putString(KEY, value.toString()).commit()) {
+            "AURA event queue persistence failed"
+        }
     }
 
     private fun AuraEvent.toWireJson(): JSONObject = JSONObject()

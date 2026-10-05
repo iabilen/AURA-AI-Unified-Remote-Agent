@@ -40,3 +40,10 @@ Chronological, append-only project continuity log. Keep entries concise and fact
 - Added narrow coalescing for noisy battery/power/screen/connectivity state, while preserving distinct event IDs for non-coalesced events.
 - Queue flush now sends highest-priority pending events first after reconnect; unacknowledged events remain durable and can be resent safely after a disconnect.
 - The runtime remains local-only; no external memory or backup service was added.
+
+## 2026-10-05 — Strict ACK durability and persistence
+- Closed a delivery gap where an event could be sent successfully at the WebSocket layer but never reach the durable queue, so a lost ACK could cause permanent event loss.
+- Android now persists every outbound event before attempting immediate WebSocket delivery; only an explicit relay ACK removes it.
+- Queue writes now use synchronous persistence for the bounded queue, ensuring enqueue/ACK state reaches storage before the operation returns.
+- This establishes at-least-once event delivery semantics across reconnects/process death; relay-side event IDs remain the deduplication key.
+- No external memory, backup, or runtime dependency was introduced.
