@@ -11,7 +11,7 @@ import org.json.JSONObject
 
 /** Best-effort on-device location monitor. Location is stored locally and emitted as an AURA event. */
 class AuraLocationPresence(
-    context: Context,
+    private val context: Context,
     private val publish: (AuraEvent) -> Unit,
     private val store: AuraPresenceStore
 ) {
