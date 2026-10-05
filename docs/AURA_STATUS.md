@@ -62,48 +62,31 @@ AURA runtime memory is standalone, offline and device-local. AURA must not depen
 
 These are internal maturity indicators, not project completion percentages.
 
-## Superseded local-model exploration
+## Current architecture decision: single Brain + OpenAI/ChatGPT
 
-An earlier A54 exploration evaluated on-device model options and a possible two-model action pipeline. That direction was explicitly rejected in favor of the original single-Brain architecture. The exploration is retained only as historical context; it is not part of the current runtime design or roadmap.
+The earlier local-model exploration is historical context only. It is not part of the current runtime design or roadmap. AURA now follows the approved original single-Brain architecture with OpenAI/ChatGPT as the single external AI intelligence path.
 
-No local model is required by the current AURA runtime. The active architecture is the single Brain + OpenAI/ChatGPT path recorded below.
-
-## 2026-10-05 decision: single Brain + OpenAI/ChatGPT
-
-The user approved simplifying AURA around the original Brain and explicitly requested that the OpenAI/ChatGPT integration be included as the single external AI intelligence path. Gemma and FunctionGemma/Mobile Actions are no longer part of the intended AURA runtime architecture.
-
-### Design
+### Active design
 - Preserve `AuraRuntime → Brain → Tools → ActionGate → Android → Verification → Event Queue/ACK`.
-- Brain remains the central orchestration component; do not rewrite it into multiple new AI/agent layers.
-- Remove Gemma/local-LLM/FunctionGemma infrastructure only after a dependency audit proves each item is no longer required.
-- Integrate OpenAI/ChatGPT at the smallest practical Brain-facing boundary. Provider-specific code must not spread into Tools, Android services, Gate or Verification.
-- OpenAI/ChatGPT may reason, interpret context and propose tool/action work; existing authorization, execution and verification remain authoritative.
+- Brain remains the central orchestration component; no second AI, FunctionGemma/Mobile Actions layer, or new multi-agent Brain architecture.
+- OpenAI/ChatGPT is integrated at the Brain-facing provider boundary. Provider-specific code stays out of Tools, Android services, Gate and Verification.
+- OpenAI/ChatGPT may reason, interpret context and propose tool/action work; authorization, execution and verification remain authoritative.
 - AURA persistent runtime memory remains device-local/offline. ChatGPT is not AURA memory.
 - API credentials must never be committed or packaged into the APK.
 - Network/API failure must fail safely and must never bypass authorization or claim an action succeeded without verification.
 
-### Implementation plan
-1. Inventory all Gemma, FunctionGemma/Mobile Actions, `LocalModelEngine`, llama.cpp/native inference, model presets and model-only dependencies.
-2. Map their consumers and classify each as removable, replaceable or still required.
-3. Audit the current Brain call path and identify the minimum provider integration point.
-4. Check current official OpenAI API documentation and select the smallest suitable API boundary for Brain.
-5. Define credential storage/provisioning, timeout/cancellation, network failure, privacy/logging and authorization handoff before live integration.
-6. Remove dead local-AI infrastructure in the smallest safe changeset.
-7. Connect the existing Brain to OpenAI/ChatGPT without redesigning the rest of AURA.
-8. Add focused tests for provider success/failure, malformed output, timeout/cancellation, offline behavior, authorization rejection and verification failure.
-9. Re-scan for dead Gemma/model references, secrets and accidental changes to Queue/ACK, Gate, Tools and Verification.
-10. Run CI/audit gates. No APK build at this stage.
-11. Only after gates pass, and only if the user explicitly asks, produce an APK and later perform A54 physical validation.
+### Implementation state
+The approved single-Brain + OpenAI/ChatGPT design is implemented on `aura/pre-device-hardening-plan`. Gemma/FunctionGemma and the local llama.cpp runtime path have been removed. OpenAI is the single external AI provider boundary.
 
-### Acceptance criteria
-- No Gemma or FunctionGemma model is required for normal AURA operation.
-- No unnecessary local LLM runtime remains after dependency audit.
+The implementation was verified by test-only Android CI. No APK was assembled or uploaded. Live OpenAI credential/API validation and A54 physical end-to-end validation remain intentionally pending.
+
+### Acceptance state
 - Brain remains recognizable and behaviorally central.
 - OpenAI/ChatGPT is the single external AI intelligence path.
 - Tools, ActionGate, Android execution, Verification and Event Queue/ACK remain authoritative.
 - No API secret reaches GitHub or the APK.
 - Provider/network failures are explicit and safe.
-- Changed-path tests pass and unrelated baseline failures remain documented.
+- Focused tests pass.
 - No APK is built/replaced without explicit user request.
 
 ### Process state
