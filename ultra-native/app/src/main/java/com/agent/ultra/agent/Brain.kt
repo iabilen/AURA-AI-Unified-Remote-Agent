@@ -15,6 +15,7 @@ import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The brain: a 12-turn tool loop. Ported from the proven BrainExecutor.ts —
@@ -38,6 +39,14 @@ class Brain(private val appContext: Context, private val local: com.agent.ultra.
     /** Called with the final user-facing answer of a run. The voice session
      * speaks it; the chat screen speaks it when speak-back is enabled. */
     var onAnswer: ((String) -> Unit)? = null
+    private val answerListeners = CopyOnWriteArrayList<(String) -> Unit>()
+
+    fun addAnswerListener(listener: (String) -> Unit) { answerListeners += listener }
+
+    private fun notifyAnswer(text: String) {
+        onAnswer?.invoke(text)
+        answerListeners.forEach { it(text) }
+    }
 
     init {
         val cfg = ProviderConfig.load(appContext)
@@ -451,7 +460,7 @@ class Brain(private val appContext: Context, private val local: com.agent.ultra.
      * whoever is listening (the voice session, or chat speak-back). */
     private fun answer(text: String) {
         emit(text)
-        onAnswer?.invoke(text)
+        notifyAnswer(text)
     }
 
     /** Direct local answer for the offline path — no tool loop at 1B scale. */
@@ -467,7 +476,7 @@ class Brain(private val appContext: Context, private val local: com.agent.ultra.
         }
         val finalMsg = ChatStore.messageById(msg.id) ?: msg
         ChatStore.persist(finalMsg)
-        onAnswer?.invoke(finalMsg.text)
+        notifyAnswer(finalMsg.text)
     }
 
     /** Conservative classifier: only commands that map cleanly to the local
@@ -753,7 +762,7 @@ JSON:"""
             android.util.Log.i("UltraBrain", "EMIT TAIL: ${finalText.length}ch alreadyOnScreen=$alreadyOnScreen")
             if (alreadyOnScreen) {
                 ChatStore.persist(streamed!!)
-                onAnswer?.invoke(finalText)
+                notifyAnswer(finalText)
             } else {
                 answer(finalText)
             }

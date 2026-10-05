@@ -33,6 +33,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.agent.ultra.agent.Brain
 import com.agent.ultra.local.LocalModelEngine
+import com.agent.ultra.aura.AuraRuntime
 import com.agent.ultra.ui.ChatMessage
 import com.agent.ultra.ui.ChatStore
 import com.agent.ultra.ui.Speaker
@@ -83,6 +84,7 @@ class VoiceActivity : ComponentActivity() {
                 val engine = remember { LocalModelEngine.shared(applicationContext) }
                 val brain = remember {
                     Brain(applicationContext, engine).also { b ->
+                        AuraRuntime.attachBrain(b)
                         b.onAnswer = { text ->
                             reply = text
                             state = "speaking"

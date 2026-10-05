@@ -23,3 +23,12 @@ JDK 17, API 36, NDK 29.0.14206865, arm64-v8a, llama.cpp Android build, minSdk 28
 
 ## Safety
 Do not expose an unauthenticated remote-control endpoint. Preserve the existing gate/confirmation behavior for consequential actions.
+
+## Bridge MVP — implemented
+- AURA Event Bus: `AuraEvent` + `AuraEventBus` + `AuraCore`.
+- Secure outbound transport: `AuraBridgeClient` uses `wss://` only and Bearer authentication; the phone does not open a listening remote-control socket.
+- Runtime: `AuraRuntime` owns the device-neutral bridge/core layer and attaches to the existing `Brain`.
+- Existing Brain safety/gate/tool path is preserved; remote tasks enter through `Brain.run()`.
+- Bridge protocol v1 starts with `hello`, accepts `task`, and returns `result`.
+- Bridge endpoint/token are deliberately not hard-coded. Configure later through `AuraRuntime.configureBridge(endpoint, token)`.
+- Next: relay/MCP server, pairing UI, persistent foreground wake service, event sources, and full request/response correlation.

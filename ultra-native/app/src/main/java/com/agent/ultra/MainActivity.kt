@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.agent.ultra.local.LocalModelEngine
+import com.agent.ultra.aura.AuraRuntime
 import com.agent.ultra.ui.ChatScreen
 import com.agent.ultra.ui.SettingsScreen
 import com.agent.ultra.ui.theme.AgentUltraTheme
@@ -24,6 +25,7 @@ class MainActivity : ComponentActivity() {
         // the very same state. This is what makes a device test one command
         // instead of four settings screens.
         AgentAccessibilityService.applySetupFile(this)
+        AuraRuntime.start(applicationContext)
         enableEdgeToEdge()
         setContent {
             AgentUltraTheme {

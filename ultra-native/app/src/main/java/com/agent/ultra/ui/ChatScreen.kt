@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import com.agent.ultra.AgentAccessibilityService
 import com.agent.ultra.agent.Brain
 import com.agent.ultra.local.LocalModelEngine
+import com.agent.ultra.aura.AuraRuntime
 import kotlinx.coroutines.launch
 
 @Composable
@@ -50,7 +51,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Rebuilt when the provider config changes (settings save bumps the key).
-    val brain = remember(configVersion) { Brain(context.applicationContext, localEngine) }
+    val brain = remember(configVersion) { Brain(context.applicationContext, localEngine).also(AuraRuntime::attachBrain) }
 
     // Speak-back: off by default, switched on in Settings. The engine is built
     // once and torn down with the screen.
