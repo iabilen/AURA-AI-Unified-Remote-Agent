@@ -9,6 +9,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -61,7 +63,7 @@ class AuraBridgeClient(
         require(relayHttpEndpoint.startsWith("https://")) { "AURA enrollment endpoint must use https://" }
         val requestBody = "{\"pairingCode\":\"${pairingCode.trim().uppercase()}\",\"deviceId\":\"$deviceId\"}"
         val request = Request.Builder().url(relayHttpEndpoint.trimEnd('/') + "/enroll")
-            .post(okhttp3.RequestBody.create(okhttp3.MediaType.parse("application/json"), requestBody)).build()
+            .post(requestBody.toRequestBody("application/json".toMediaType())).build()
         return runCatching {
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@use false
