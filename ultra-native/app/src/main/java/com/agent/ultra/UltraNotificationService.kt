@@ -40,13 +40,11 @@ class UltraNotificationService : NotificationListenerService() {
             val warned = runTriggers(sbn.packageName, title, text)
 
             if (!com.agent.ultra.ui.UltraPrefs.captureNotifications(this)) return
-            val line = buildString {
-                append(sbn.postTime).append(" | ").append(sbn.packageName)
-                if (warned != null) append(" | [LOOKS LIKE A SCAM: ").append(warned).append("]")
-                if (title.isNotBlank()) append(" | ").append(title.take(60))
-                if (text.isNotBlank()) append(" | ").append(text.take(120))
-                append("\n")
-            }
+            val line = NotificationLogSanitizer.formatNotificationLog(
+                sbn.postTime,
+                sbn.packageName,
+                warned != null,
+            )
             val f = File(filesDir, "notifications.log")
             f.appendText(line)
             if (f.length() > 64 * 1024) {
@@ -89,7 +87,7 @@ class UltraNotificationService : NotificationListenerService() {
             when (a.type) {
                 EventTrigger.Action.Type.WARN -> {
                     warned = a.data
-                    Log.i(TAG, "SCAM WARN from=${pkg}: ${a.data}")
+                    Log.i(TAG, NotificationLogSanitizer.formatScamWarningLog(pkg, true))
                     val posted = postWarning(title, a.label)
                     android.os.Handler(mainLooper).post {
                         if (!posted) Toast.makeText(this, "Ultra: " + a.label, Toast.LENGTH_LONG).show()
