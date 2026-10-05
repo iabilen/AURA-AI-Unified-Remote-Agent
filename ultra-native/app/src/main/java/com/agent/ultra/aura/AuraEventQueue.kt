@@ -91,7 +91,7 @@ class AuraEventQueue(context: Context) {
 
     private fun trimToBound(current: JSONArray) {
         while (current.length() > MAX_EVENTS) {
-            var removeIndex = 0
+            var removeIndex = -1
             var lowestPriority = Int.MAX_VALUE
             var oldestTimestamp = Long.MAX_VALUE
             for (i in 0 until current.length()) {
@@ -107,6 +107,7 @@ class AuraEventQueue(context: Context) {
                     removeIndex = i
                 }
             }
+            if (removeIndex < 0) return
             current.remove(removeIndex)
         }
     }
