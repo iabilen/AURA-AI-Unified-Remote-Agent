@@ -3,21 +3,20 @@ package com.agent.ultra
 import android.app.Application
 import android.content.Intent
 import androidx.core.content.ContextCompat
+import com.agent.ultra.aura.AuraRuntime
 
 class UltraApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        // Pre-tick apps that look like they hold money or credentials, once,
-        // before the agent has a chance to read anything.
+        // Start AURA at process creation so notification/event sources can wake the bridge
+        // even when the chat UI has never been opened.
+        try { AuraRuntime.start(this) } catch (e: Exception) {
+            android.util.Log.w("UltraApp", "AURA runtime start failed", e)
+        }
         try { com.agent.ultra.ui.ProtectedApps.seedIfUnset(this) } catch (_: Exception) {}
-        // Foreground service keeps the process alive when backgrounded —
-        // on this device class (3.5GB Samsung) backgrounded processes lose
-        // their accessibility binding and get reclaimed.
         try {
-            ContextCompat.startForegroundService(
-                this, Intent(this, AgentBackgroundService::class.java)
-            )
+            ContextCompat.startForegroundService(this, Intent(this, AgentBackgroundService::class.java))
         } catch (e: Exception) {
             android.util.Log.w("UltraApp", "background service start failed", e)
         }

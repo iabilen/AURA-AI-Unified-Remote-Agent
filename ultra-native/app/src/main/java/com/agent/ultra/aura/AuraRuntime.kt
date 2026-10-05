@@ -6,11 +6,9 @@ import com.agent.ultra.local.LocalModelEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 
 /** Process-level AURA runtime. A54 is only the first device body; this layer stays device-neutral. */
 object AuraRuntime {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var initialized = false
     private var brain: Brain? = null
     private var pendingId: String? = null
@@ -27,8 +25,6 @@ object AuraRuntime {
             brain(app).run(task)
         }
         bridge = AuraBridgeClient(app, core) { answer ->
-            // The first MVP returns the answer through the event channel; correlation is
-            // added by the relay protocol once the server-side session is implemented.
             bridge.sendEvent(
                 AuraEvent(
                     id = pendingId ?: "bridge",
@@ -39,6 +35,14 @@ object AuraRuntime {
             )
         }
         bridge.connect()
+    }
+
+    /** Publish a device-side event without forcing the local model to load. */
+    fun publishEvent(event: AuraEvent): Boolean {
+        if (!::core.isInitialized) return false
+        val accepted = core.publish(event)
+        if (::bridge.isInitialized && bridge.isConfigured()) bridge.sendEvent(event)
+        return accepted
     }
 
     fun attachBrain(instance: Brain) {
