@@ -4,72 +4,70 @@ This is the first real external relay for AURA. It has two authenticated surface
 
 - `/device` — outbound WebSocket endpoint for the Android AURA body.
 - `/mcp` — remote MCP endpoint for an authorized MCP host such as ChatGPT developer mode.
-- `/healthz` — liveness only.
+- `/healthz` — liveness/status endpoint; no control access.
 
 The Android client remains outbound-only. The relay never exposes a raw Android control port.
 
 ## Current flow
 
 ```text
-Android notification
-      ↓
-AURA NotificationListener
-      ↓
+Android notification / location / connectivity
+        ↓
 AURA Event Bus
-      ↓
-Durable event queue
-      ↓ WSS
+        ↓
+Durable Android event queue
+        ↓
+WSS /device
+        ↓
 AURA Relay
-      ↓ MCP
+        ↓
+Durable relay event journal
+        ↓
+MCP /mcp
+        ↓
 ChatGPT
-      ↓ aura_send_task
-AURA Relay
-      ↓ WSS
+        ↓
+aura_send_task
+        ↓
+WSS /device
+        ↓
 A54 / Brain.run()
 ```
 
-The relay keeps a bounded in-memory event buffer and correlates task IDs with result IDs. The Android queue retries events after reconnect and removes them only after relay acknowledgement.
+The Android queue keeps events until the relay acknowledges them. The relay persists accepted events to a bounded file-backed journal **before** sending the ACK. This means a relay restart does not erase the event history, and duplicate delivery is deduplicated by device ID + event ID.
 
-## Run
+Set `AURA_EVENT_STORE_PATH` to choose the journal path; the default is `./data/events.json`. The file is written with restrictive permissions and replaced atomically.
+
+## Build and test
 
 Node.js 20+ is required.
 
 ```bash
 npm install
-cp .env.example .env
-# export the values from .env in your deployment environment
 npm run typecheck
+node smoke-test.mjs
 npm start
 ```
 
-The phone must be configured with the relay's **WSS** URL, for example:
+The CI smoke test starts a real relay process and verifies:
 
-`wss://your-host.example/device`
-
-The MCP host uses:
-
-`https://your-host.example/mcp`
-
-Do not expose plain `ws://` or unauthenticated `/mcp` in production. Put the service behind TLS/reverse proxy or configure HTTPS directly.
+1. authenticated AURA WebSocket connection,
+2. event delivery and relay ACK,
+3. durable event persistence,
+4. event recovery after relay restart,
+5. MCP authentication rejection without a token and acceptance with the configured token.
 
 ## MCP tools
 
 - `aura_devices` — discover authorized/connected bodies.
 - `aura_status` — inspect a connected body.
-- `aura_events` — read recent Android events, including notifications.
-- `aura_send_task` — send a task to the Android body and wait for its correlated result.
+- `aura_events` — read recent persisted Android events.
+- `aura_send_task` — send an authorized task to the Android body and wait for its correlated result.
 
-## Important ChatGPT integration boundary
+High-impact Android actions remain subject to AURA's existing confirmation/safety path.
 
-A remote MCP server can be connected to supported ChatGPT developer-mode/custom-MCP flows, but the MCP server itself does not magically force the native ChatGPT app to wake on an arbitrary Android event. The relay therefore makes events durable and queryable now; unsolicited host-side wake/subscription behavior is a separate integration capability and must be verified on the target ChatGPT surface.
+## ChatGPT integration boundary
 
-## Security
+A remote MCP server can be connected through supported ChatGPT custom MCP/app flows. Current OpenAI documentation states that full MCP apps are available on ChatGPT web for Business and Enterprise/Edu, while custom MCP apps are not available in the native ChatGPT mobile app. Therefore the relay is being built as a standards-based remote MCP service, but native-mobile unsolicited wake-up must not be assumed until the supported ChatGPT surface provides it.
 
-- MCP bearer token and device bearer tokens are separate.
-- Tokens are compared with constant-time comparison.
-- Device authentication happens during the WebSocket upgrade.
-- Device IDs are explicit; production should use per-device tokens rather than the bootstrap `*` mapping.
-- High-impact Android actions still pass through AURA's existing safety/confirmation path.
-- No notification content is logged by the relay code itself.
-
-Pairing/revocation and durable server-side event storage are the next relay hardening steps.
+Do not expose unauthenticated `ws://` or `/mcp` in production. Put the relay behind TLS/WSS and use separate MCP and per-device credentials.
