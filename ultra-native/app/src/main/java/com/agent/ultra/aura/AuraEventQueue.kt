@@ -4,12 +4,18 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Small durable outbound queue for device events. It survives normal process death and is bounded. */
+/**
+ * Small durable outbound queue for device events.
+ *
+ * The queue is bounded, ACK-driven, priority-aware, and coalesces only noisy
+ * state events. An event remains durable until the relay explicitly ACKs its id.
+ */
 class AuraEventQueue(context: Context) {
     companion object {
         private const val PREFS = "aura_event_queue"
         private const val KEY = "pending"
         private const val MAX_EVENTS = 100
+        private val COALESCE_TYPES = setOf("battery", "power", "screen", "connectivity")
     }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -18,10 +24,17 @@ class AuraEventQueue(context: Context) {
     fun enqueue(event: AuraEvent) {
         val current = load()
         for (i in 0 until current.length()) {
-            if (current.optJSONObject(i)?.optString("id") == event.id) return
+            val existing = current.optJSONObject(i) ?: continue
+            if (existing.optString("id") == event.id) return
+            if (sameCoalesceKey(existing, event)) {
+                current.put(i, event.toWireJson())
+                save(current)
+                return
+            }
         }
+
         current.put(event.toWireJson())
-        while (current.length() > MAX_EVENTS) current.remove(0)
+        trimToBound(current)
         save(current)
     }
 
@@ -42,6 +55,42 @@ class AuraEventQueue(context: Context) {
             for (i in 0 until current.length()) {
                 current.optJSONObject(i)?.let { add(JSONObject(it.toString())) }
             }
+        }.sortedWith(compareByDescending<JSONObject> { it.optInt("priority", 0) }
+            .thenBy { it.optLong("timestampMs", Long.MAX_VALUE) })
+    }
+
+    private fun sameCoalesceKey(existing: JSONObject, event: AuraEvent): Boolean {
+        if (event.type !in COALESCE_TYPES) return false
+        if (existing.optString("type") != event.type) return false
+        if (existing.optString("source") != event.source) return false
+        return when (event.type) {
+            "battery" -> true
+            "power" -> true
+            "screen" -> true
+            "connectivity" -> existing.optJSONObject("payload")?.optString("transport") ==
+                event.payload.optString("transport")
+            else -> false
+        }
+    }
+
+    private fun trimToBound(current: JSONArray) {
+        while (current.length() > MAX_EVENTS) {
+            var removeIndex = 0
+            var lowestPriority = Int.MAX_VALUE
+            var oldestTimestamp = Long.MAX_VALUE
+            for (i in 0 until current.length()) {
+                val item = current.optJSONObject(i) ?: continue
+                val priority = item.optInt("priority", 0)
+                val timestamp = item.optLong("timestampMs", Long.MAX_VALUE)
+                if (priority < lowestPriority ||
+                    (priority == lowestPriority && timestamp < oldestTimestamp)
+                ) {
+                    lowestPriority = priority
+                    oldestTimestamp = timestamp
+                    removeIndex = i
+                }
+            }
+            current.remove(removeIndex)
         }
     }
 

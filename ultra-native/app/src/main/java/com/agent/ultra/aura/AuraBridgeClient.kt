@@ -22,7 +22,7 @@ import kotlin.math.min
  *
  * The phone never opens a listening remote-control socket. AURA connects out to
  * a trusted relay using WSS and a per-device bearer token. Durable device events
- * are queued locally until the relay acknowledges them.
+ * remain queued locally until the relay acknowledges them.
  */
 class AuraBridgeClient(
     private val context: Context,
