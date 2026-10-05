@@ -1,6 +1,6 @@
 # AURA — Current Status & Roadmap
 
-> Last updated: 2026-10-05 18:05 UTC / 2026-10-05 21:05 Türkiye (UTC+3)
+> Last updated: 2026-10-05 18:50 UTC / 2026-10-05 21:50 Türkiye (UTC+3)
 > Branch: `aura/pre-device-hardening-plan`
 > Rule: No APK build/replacement unless explicitly requested by the user.
 
@@ -181,11 +181,15 @@ The user approved simplifying AURA around the original Brain and explicitly requ
 - No APK is built/replaced without explicit user request.
 
 ### Process state
-The user approved the written single-Brain + OpenAI/ChatGPT design. The detailed implementation plan is now recorded at `docs/superpowers/plans/2026-10-05-single-brain-openai.md`. Implementation code changes have not started yet.
+The approved single-Brain + OpenAI/ChatGPT plan has been implemented on `aura/pre-device-hardening-plan`. Brain remains the central orchestrator; Gemma/FunctionGemma and the local llama.cpp runtime path were removed. OpenAI is now the single external AI provider boundary.
 
-The next execution gate is implementation of that plan on `aura/pre-device-hardening-plan`; APK generation remains explicitly out of scope until the user requests it.
+Verification: the test-only Android CI run `37358547424` passed after the final parser-fixture correction. No APK was assembled or uploaded. Live OpenAI credential/API validation and A54 physical end-to-end validation remain intentionally pending.
+
+Implementation remains on `aura/pre-device-hardening-plan`; `main` was not changed.
 
 ## Change log
 - 2026-10-05 18:24 UTC / 21:24 Türkiye: user approved the single-Brain direction, requested removal of Gemma and integration of OpenAI/ChatGPT as the single external AI path, and asked for the plan to be recorded.
 
 - 2026-10-05 18:31 UTC / 21:31 Türkiye: detailed implementation plan created at `docs/superpowers/plans/2026-10-05-single-brain-openai.md` after user approval. Plan preserves Brain, removes Gemma/local inference, integrates OpenAI at the existing provider boundary, and keeps APK generation gated.
+
+- 2026-10-05 18:49 UTC / 21:49 Türkiye: single-Brain + OpenAI implementation verified by test-only CI; no APK generated. Gemma/local inference runtime removed; live API and physical A54 validation remain pending.

@@ -1,106 +1,62 @@
-# Agent Ultra
+# Agent Ultra / AURA
 
-**An Android agent that runs its own brain on the phone.**
+**An Android agent whose original Ultra Brain remains the central orchestrator.**
 
-Not a chat app with a cloud API behind it. A local LLM — Qwen2.5 7B, Llama 3.1 8B,
-Gemma, Phi, your choice — loaded into memory on the handset, driving real tools:
-the accessibility service, the camera flash, the clipboard, the browser, other
-apps' user interfaces. With the network off, it still works.
+The current direction deliberately keeps the project small: one Brain, the existing
+tool/action safety stack, and one external AI provider. Gemma, FunctionGemma and the
+previous on-device llama.cpp model runtime are no longer part of the AURA runtime.
 
-<p align="center">
-  <a href="https://x.com/Dafarusd"><strong>Built by @Dafarusd</strong></a>
-</p>
+## Current architecture
 
----
+```text
+User / Device Event
+        ↓
+      Brain
+        ↓
+      Tools
+        ↓
+   ActionGate
+        ↓
+     Android
+        ↓
+   Verification
+        ↓
+ Event Queue / ACK
+```
 
-## What it actually does
+The Brain keeps the existing orchestration, memory, recipes, scam checks, tool loop,
+gate and verification behavior. We are not introducing a second agent framework or
+rewriting Brain into multiple new layers.
 
-- **Runs on-device.** Pick a model that fits your phone and it downloads on
-  demand. Nothing is bundled — the APK is 15 MB. Airplane mode, Wi-Fi off, no
-  SIM: it still answers and still operates the phone.
-- **Drives any app you allow.** It reads the screen through Android's
-  accessibility tree and acts on it — taps, typing, scrolling, navigation.
-- **Reads a page properly.** Not the first forty labels. It scrolls the whole
-  thing and returns *structured items*, so a price belongs to its own product
-  rather than to whichever line happened to be nearby.
-- **Speaks and listens.** Hold the side button, talk, put the phone down, hear
-  the answer. Transcription is on-device.
-- **Remembers what worked.** A task that succeeds is recorded with its
-  arguments; ask the same thing in different words later and it recalls the
-  approach. Name a run and it becomes a routine you can replay.
+## AI provider
 
-## What it will not do
+AURA uses OpenAI through the existing provider boundary. The Android client sends the
+bounded conversation context needed for the current turn to the OpenAI Responses API
+and uses `store=false`, keeping AURA runtime continuity device-local. The model ID is
+configurable; the current default is `gpt-6-luna`.
 
-This is the part worth reading.
+The API key is supplied by the user at runtime and is not stored in source control or
+bundled into the APK. A provider failure does not fall back to another AI model and
+does not bypass the local ActionGate or verification layer.
 
-- **It only enters apps you tick.** Allowlist by default, and it fails closed.
-  Whatever the agent reads is sent to the cloud model to decide the next step,
-  so "don't look" matters as much as "don't act".
-- **Messages, contacts and location are off by default**, behind their own
-  switch, because they read Android's databases rather than the screen — the
-  app list does not cover them.
-- **A tap that commits something stops and asks.** Pay, buy, order, confirm,
-  send, transfer, delete, subscribe. Both indexed and raw-coordinate taps, so
-  the check cannot be sidestepped by choosing coordinates. An unanswered prompt
-  is a refusal, never an approval.
-- **It cannot pass your fingerprint or PIN.** Anything behind one ends with the
-  phone in your hand.
-- **Notification logging is off by default** and never records a protected app.
+## What AURA still does
 
-## The three projects behind it
+- Drives allowed Android tools through the existing accessibility/device layer.
+- Maintains the existing deterministic safety gate.
+- Verifies actions before reporting success.
+- Preserves Event Queue / ACK semantics.
+- Stores runtime continuity locally on the device.
+- Supports the existing chat and voice surfaces.
+- Remembers successful task sequences and routines through the existing memory system.
 
-**gatellml — the policy gate.** A deterministic enforcement layer, ported to
-Kotlin and running on the handset. Every tool call is checked against a
-deny-by-default manifest before it executes: a tool that is not declared cannot
-run at all. Arguments carry their origins, so an action whose target never
-appeared in your request is blocked and handed back to you to confirm. The model
-is never trusted; the program is. Research and measurements:
-[github.com/dafarusd/gate](https://github.com/dafarusd/gate)
+## Current limits
 
-**gate — the resolve channel.** The research named an untested gap: a gate with
-no interactive channel can only refuse. That gap is closed here. A block that a
-human could legitimately cure pauses the run, shows the exact target, and waits.
-Your tap mints it trusted for that episode and the work continues. Taint, spoofing
-and undeclared tools are never confirmable, by design.
+- A live OpenAI API call has not yet been exercised with a real user credential.
+- Full A54 physical end-to-end validation is still pending.
+- APK generation remains a separate explicit step and is not part of normal verification CI.
 
-**Mind Meld — the split that made the small models usable.** A 1B model on a
-phone will not emit clean JSON, and no amount of prompting fixes that. Mind Meld
-established the division: **the model owns intent, the engine owns structure.**
-Ask for the flashlight and the model supplies only the intent; a deterministic
-parser builds the call. That one idea is why a phone-sized model can drive real
-tools instead of merely talking about them — and it is used again for routine
-names, after a 70B model read "run my morning briefing" as a question about
-which model it was.
+## Development rule
 
-## Install
-
-Download the APK from the latest release, allow the install, and open it.
-
-1. **Settings → WHERE THE AGENT MAY GO** — tick the apps it may enter. Nothing
-   is reachable until you do.
-2. **Settings → AI PROVIDER** — any OpenAI-compatible endpoint.
-3. **Settings → ON-DEVICE MODEL** — the list is scored against *your* phone's
-   memory: fits comfortably, tight, or too big.
-4. Enable the accessibility service when prompted.
-
-Requires Android 8.0 or newer, arm64.
-
-## Honest limits
-
-- In-app navigation handles direct tasks well and still struggles with long
-  multi-step flows inside unfamiliar apps.
-- Structured extraction reads *ordered* fields. It knows which lines belong to
-  one item; it does not label which is the title and which is the rating.
-- Some apps detect accessibility services and refuse to run. That is their
-  choice and it is not worked around.
-- Speed on-device depends on the model you pick. A 7B is a far better offline
-  brain and a far worse quick answer than a 1B, so the fast path is reserved for
-  small models and the large ones handle offline and explicit requests.
-
-## Source
-
-The source is private. The build is free to download and use.
-
----
-
-**[@Dafarusd on X](https://x.com/Dafarusd)** · Copyright (c) 2026 Dafarus
+Do not expand the architecture unless the existing Brain/Ultra design proves insufficient.
+Do not build or replace an APK unless explicitly requested. Do not merge hardening work
+into `main` before the agreed gates pass.
