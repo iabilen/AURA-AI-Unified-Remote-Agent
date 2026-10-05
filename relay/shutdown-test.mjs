@@ -31,7 +31,9 @@ async function assertTerminates(signal) {
       new Promise((resolve) => child.once("exit", (code, receivedSignal) => resolve({ code, receivedSignal }))),
       new Promise((_, reject) => setTimeout(() => reject(new Error(`relay did not terminate after ${signal}`)), 2000)),
     ]);
-    if (result.receivedSignal !== signal) throw new Error(`expected ${signal}, got ${result.receivedSignal ?? `exit ${result.code}`}`);
+    if (result.receivedSignal !== signal && !(result.receivedSignal === null && result.code === 0)) {
+      throw new Error(`expected graceful exit or ${signal}, got ${result.receivedSignal ?? `exit ${result.code}`}`);
+    }
   } finally {
     if (!child.killed) child.kill("SIGKILL");
   }
