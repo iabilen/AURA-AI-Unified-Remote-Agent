@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Agent Ultra A54</string>
+    <string name="app_name">AURA</string>
     <string name="accessibility_service_description">Agent Ultra observes screen content and performs taps, swipes, and text entry to carry out tasks you ask for.</string>
     <string name="app_function_app_display_description">Lets Android AI assistants ask Agent Ultra to carry out user-requested tasks on this phone.</string>
 </resources>
