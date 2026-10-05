@@ -10,7 +10,7 @@ import * as z from "zod/v4";
 
 type JsonRecord = Record<string, unknown>;
 type Device = { id: string; socket: WebSocket; connectedAt: number; lastSeenAt: number };
-type PendingTask = { resolve: (value: JsonRecord) => void; timer: NodeJS.Timeout };
+type PendingTask = { resolve: (value: JsonRecord) => void; timer: NodeJS.Timeout; deviceId: string };
 
 const PORT = Number(process.env.PORT ?? 8787);
 const MCP_TOKEN = process.env.AURA_MCP_TOKEN ?? "";
@@ -172,10 +172,16 @@ function buildMcpServer(): McpServer {
     const id = randomUUID();
     await relayDatabase.recordTask(id, deviceId, "mcp", task, Date.now());
     const result = await new Promise<JsonRecord>((resolve) => {
-      const timer = setTimeout(() => { pendingTasks.delete(id); resolve({ id, status: "timeout", deviceId }); }, TASK_TIMEOUT_MS);
-      pendingTasks.set(id, { resolve, timer });
+      const timer = setTimeout(() => {
+        pendingTasks.delete(id);
+        void relayDatabase.completeTask(id, "timeout", { deviceId }, Date.now());
+        resolve({ id, status: "timeout", deviceId });
+      }, TASK_TIMEOUT_MS);
+      pendingTasks.set(id, { resolve, timer, deviceId });
       if (!send(device.socket, { type: "task", id, source: "mcp", priority: 10, task, protocol: 1 })) {
-        clearTimeout(timer); pendingTasks.delete(id); resolve({ id, status: "offline", deviceId });
+        clearTimeout(timer); pendingTasks.delete(id);
+        void relayDatabase.completeTask(id, "offline", { deviceId }, Date.now());
+        resolve({ id, status: "offline", deviceId });
       }
     });
     return { content: [{ type: "text", text: JSON.stringify(result) }] };
@@ -259,7 +265,15 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage, deviceId: string) =>
   ws.on("close", () => {
     if (devices.get(deviceId)?.socket === ws) {
       devices.delete(deviceId);
-      void relayDatabase.recordDevice(deviceId, false, Date.now(), Date.now());
+      const now = Date.now();
+      void relayDatabase.recordDevice(deviceId, false, now, now);
+      for (const [taskId, pending] of pendingTasks) {
+        if (pending.deviceId !== deviceId) continue;
+        clearTimeout(pending.timer);
+        pendingTasks.delete(taskId);
+        void relayDatabase.completeTask(taskId, "offline", { deviceId }, now);
+        pending.resolve({ id: taskId, status: "offline", deviceId });
+      }
     }
   });
   ws.on("error", () => ws.close());
