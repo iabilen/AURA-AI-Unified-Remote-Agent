@@ -58,7 +58,7 @@ jobs:
           test -f "$HOME/llama-android/lib/libllama.a"
       - name: Assemble debug APK
         working-directory: ultra-native
-        run: ./gradlew assembleDebug --no-daemon
+        run: bash ./gradlew assembleDebug --no-daemon
       - name: Verify APK
         run: |
           test -s ultra-native/app/build/outputs/apk/debug/app-debug.apk
