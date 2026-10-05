@@ -9,6 +9,7 @@ object AuraBridgeProtocol {
     const val TYPE_RESULT = "result"
     const val TYPE_EVENT = "event"
     const val TYPE_ERROR = "error"
+    const val TYPE_ACK = "ack"
     const val TYPE_PING = "ping"
     const val TYPE_PONG = "pong"
     const val TYPE_STATUS = "status"

@@ -21,14 +21,12 @@ import kotlin.math.min
  * Secure outbound AURA bridge transport.
  *
  * The phone never opens a listening remote-control socket. AURA connects out to
- * a trusted relay using WSS and a per-device bearer token. The transport owns
- * reconnect/backoff and a small wire protocol; task execution remains inside
- * AuraCore/Brain so the existing safety path is preserved.
+ * a trusted relay using WSS and a per-device bearer token. Durable device events
+ * are queued locally until the relay acknowledges them.
  */
 class AuraBridgeClient(
     private val context: Context,
     private val core: AuraCore,
-    private val onAnswer: (String) -> Unit,
 ) {
     companion object {
         private const val PREFS = "aura_bridge"
@@ -41,6 +39,7 @@ class AuraBridgeClient(
     }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val queue = AuraEventQueue(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -102,8 +101,12 @@ class AuraBridgeClient(
 
     fun isConnected(): Boolean = socket != null
 
-    fun sendEvent(event: AuraEvent): Boolean =
-        socket?.send(event.toJson().toString()) == true
+    /** Sends immediately when connected; otherwise persists the event for the next session. */
+    fun sendEvent(event: AuraEvent): Boolean {
+        val sent = socket?.send(event.toWireJson()) == true
+        if (!sent) queue.enqueue(event)
+        return sent
+    }
 
     fun sendStatus(): Boolean {
         val status = JSONObject()
@@ -119,12 +122,15 @@ class AuraBridgeClient(
         return socket?.send(status.toString()) == true
     }
 
+    private fun flushQueue(webSocket: WebSocket) {
+        for (event in queue.pending()) {
+            if (!webSocket.send(event.toString())) break
+        }
+    }
+
     private fun scheduleReconnect() {
         if (!reconnectEnabled || !isConfigured()) return
-        val delayMs = min(
-            MAX_RECONNECT_MS,
-            MIN_RECONNECT_MS shl min(reconnectAttempt, 6),
-        )
+        val delayMs = min(MAX_RECONNECT_MS, MIN_RECONNECT_MS shl min(reconnectAttempt, 6))
         reconnectAttempt++
         scope.launch {
             delay(delayMs)
@@ -157,6 +163,7 @@ class AuraBridgeClient(
             reconnectAttempt = 0
             sendHello(webSocket)
             sendStatus()
+            flushQueue(webSocket)
             Log.i(TAG, "Bridge connected")
         }
 
@@ -165,28 +172,16 @@ class AuraBridgeClient(
                 val message = JSONObject(text)
                 when (message.optString("type")) {
                     AuraBridgeProtocol.TYPE_TASK,
-                    AuraBridgeProtocol.TYPE_EVENT -> {
-                        message.toAuraEvent()?.let(core::publish)
-                    }
-                    AuraBridgeProtocol.TYPE_PING -> {
-                        sendPong(message.optString("id", null))
-                    }
-                    AuraBridgeProtocol.TYPE_STATUS_REQUEST -> {
-                        sendStatus()
-                    }
-                    AuraBridgeProtocol.TYPE_RESULT -> {
-                        message.optString("result", null)?.takeIf { it.isNotBlank() }?.let(onAnswer)
-                    }
+                    AuraBridgeProtocol.TYPE_EVENT -> message.toAuraEvent()?.let(core::publish)
+                    AuraBridgeProtocol.TYPE_ACK -> queue.ack(message.optString("id").trim())
+                    AuraBridgeProtocol.TYPE_PING -> sendPong(message.optString("id", null))
+                    AuraBridgeProtocol.TYPE_STATUS_REQUEST -> sendStatus()
                     else -> Unit
                 }
-            }.onFailure {
-                Log.w(TAG, "Ignored malformed bridge message")
-            }
+            }.onFailure { Log.w(TAG, "Ignored malformed bridge message") }
         }
 
-        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            webSocket.close(code, reason)
-        }
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(code, reason) }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             socket = null
@@ -219,4 +214,14 @@ class AuraBridgeClient(
             },
         )
     }
+
+    private fun AuraEvent.toWireJson(): String = JSONObject()
+        .put("type", type)
+        .put("id", id)
+        .put("source", source)
+        .put("timestampMs", timestampMs)
+        .put("priority", priority)
+        .put("payload", JSONObject(payload.toString()))
+        .apply { if (type == AuraBridgeProtocol.TYPE_TASK) put("task", payload.optString("task").trim()) }
+        .toString()
 }

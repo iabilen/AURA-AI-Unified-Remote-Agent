@@ -10,9 +10,9 @@ import kotlinx.coroutines.sync.withLock
 
 /** Coordinates transport events and the existing Brain without replacing Brain's safety model. */
 class AuraCore(
-    private val bus: AuraEventBus = AuraEventBus(),
-    private val taskHandler: suspend (String) -> Unit,
+    private val taskHandler: suspend (String, String) -> Unit,
 ) {
+    private val bus = AuraEventBus()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val taskMutex = Mutex()
 
@@ -23,9 +23,7 @@ class AuraCore(
                 .collect { event ->
                     val task = event.payload.optString("task").trim()
                     if (task.isEmpty()) return@collect
-                    // One remote task at a time. This prevents two external callers from
-                    // interleaving Brain tool loops and preserves the existing task semantics.
-                    taskMutex.withLock { taskHandler(task) }
+                    taskMutex.withLock { taskHandler(event.id, task) }
                 }
         }
     }

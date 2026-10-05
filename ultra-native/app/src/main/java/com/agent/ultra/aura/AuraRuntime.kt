@@ -3,9 +3,6 @@ package com.agent.ultra.aura
 import android.content.Context
 import com.agent.ultra.agent.Brain
 import com.agent.ultra.local.LocalModelEngine
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 
 /** Process-level AURA runtime. A54 is only the first device body; this layer stays device-neutral. */
 object AuraRuntime {
@@ -20,20 +17,11 @@ object AuraRuntime {
         if (initialized) return
         initialized = true
         val app = context.applicationContext
-        core = AuraCore { task ->
-            pendingId = "bridge"
+        core = AuraCore { id, task ->
+            pendingId = id
             brain(app).run(task)
         }
-        bridge = AuraBridgeClient(app, core) { answer ->
-            bridge.sendEvent(
-                AuraEvent(
-                    id = pendingId ?: "bridge",
-                    type = AuraEventTypes.RESULT,
-                    source = "aura",
-                    payload = org.json.JSONObject().put("answer", answer),
-                )
-            )
-        }
+        bridge = AuraBridgeClient(app, core)
         bridge.connect()
     }
 
@@ -41,14 +29,14 @@ object AuraRuntime {
     fun publishEvent(event: AuraEvent): Boolean {
         if (!::core.isInitialized) return false
         val accepted = core.publish(event)
-        if (::bridge.isInitialized && bridge.isConfigured()) bridge.sendEvent(event)
+        if (::bridge.isInitialized) bridge.sendEvent(event)
         return accepted
     }
 
     fun attachBrain(instance: Brain) {
         brain = instance
         instance.addAnswerListener { text ->
-            if (::bridge.isInitialized && bridge.isConfigured()) {
+            if (::bridge.isInitialized) {
                 bridge.sendEvent(
                     AuraEvent(
                         id = pendingId ?: "bridge",
