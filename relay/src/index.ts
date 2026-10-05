@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
@@ -24,9 +24,13 @@ const pendingTasks = new Map<string, PendingTask>();
 
 function loadDeviceTokens(): Record<string, string> {
   try {
-    const value = JSON.parse(process.env.AURA_DEVICE_TOKENS ?? "{}");
-    if (!value || typeof value !== "object") return {};
-    return Object.fromEntries(Object.entries(value).filter(([id, token]) => typeof id === "string" && typeof token === "string" && token.length >= 24));
+    const value: unknown = JSON.parse(process.env.AURA_DEVICE_TOKENS ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const result: Record<string, string> = {};
+    for (const [id, token] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof token === "string" && token.length >= 24) result[id] = token;
+    }
+    return result;
   } catch {
     throw new Error("AURA_DEVICE_TOKENS must be valid JSON");
   }
@@ -155,7 +159,7 @@ server.on("upgrade", (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req, deviceId));
 });
 
-wss.on("connection", (ws: WebSocket, _req, deviceId: string) => {
+wss.on("connection", (ws: WebSocket, _req: IncomingMessage, deviceId: string) => {
   connectDevice(deviceId, ws);
   send(ws, { type: "hello", protocol: 1, deviceId, capabilities: { task: true, event: true, status: true } });
   ws.on("message", (raw) => {
