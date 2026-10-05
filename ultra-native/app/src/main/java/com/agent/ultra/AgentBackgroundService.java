@@ -24,6 +24,11 @@ public class AgentBackgroundService extends Service {
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
+        try {
+            com.agent.ultra.aura.AuraRuntime.INSTANCE.start(this);
+        } catch (Exception e) {
+            Log.w(TAG, "AURA runtime start deferred", e);
+        }
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Agent Ultra")
             .setContentText("Running in background")
