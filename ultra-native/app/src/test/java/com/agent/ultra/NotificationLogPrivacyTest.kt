@@ -19,6 +19,6 @@ class NotificationLogPrivacyTest {
         assertTrue(source.contains("NotificationLogSanitizer.formatScamWarningLog"))
         assertFalse(source.contains("append(title.take(60))"))
         assertFalse(source.contains("append(text.take(120))"))
-        assertFalse(source.contains("SCAM WARN from=${pkg}: ${a.data}"))
+        assertFalse(source.contains("SCAM WARN from=\${pkg}: \${a.data}"))
     }
 }
