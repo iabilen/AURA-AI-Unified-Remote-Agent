@@ -75,3 +75,33 @@ These are internal maturity indicators, not project completion percentages.
 - Candidate responsibilities: fast local action routing/function calling for operations such as notifications, app actions, connectivity/device controls and other explicitly exposed AURA tools.
 - Status: **idea recorded, not implemented or integrated yet**. First validate Mobile Actions 270M on the A54 in AI Edge Gallery, then assess latency, RAM, heat, reliability and function-call quality before designing the AURA integration.
 - This does **not** authorize an APK build or replacement. APK generation remains gated by an explicit user request.
+
+## Mobile Actions / FunctionGemma A54 spike findings
+- 2026-10-05 UTC+3: User tested Google AI Edge Gallery on the A54 with Gemma 4 E2B-it and Mobile Actions-270M.
+- Gemma 4 E2B-it: good Turkish understanding and good use of the user-provided `otobiyografik.txt` context, but noticeably slower on-device.
+- Mobile Actions-270M: action/function commands are executing successfully and the user confirmed that English commands and MacroDroid-style action names such as `turnOnFlashlight` work. Turkish natural-language commands are currently unreliable/not understood in the same way.
+- Current interpretation: Mobile Actions should be treated as a specialized action/function interface, not as AURA's Turkish conversational brain. Google documents Mobile Actions as a FunctionGemma 270M fine-tune that maps natural-language commands to OS tool/app intents/function calls on-device.
+- Architecture hypothesis is strengthened: Gemma 4 E2B-it should handle Turkish language, context, reasoning and planning; a lightweight action/function layer should translate/normalize the selected intent into AURA action names/tool calls; the AURA Tool/Execution Layer should remain responsible for authorization and actual Android execution.
+- Important: The exact internal implementation of Google AI Edge Gallery's Mobile Actions execution bridge is not yet reverse-engineered. Treat the existence of an action/function-to-OS intent bridge as confirmed by Google's public description, but treat any deeper internal layering details as a hypothesis until source-level inspection or controlled tests establish them.
+- No AURA code has been changed from this spike. No APK build/replacement is authorized.
+
+## Revised AURA roadmap
+1. **A54 model spike (current):** benchmark Gemma 4 E2B-it and Mobile Actions-270M on the real device for latency, RAM, heat, battery impact, context behavior and reliability.
+2. **Action vocabulary discovery:** enumerate the Mobile Actions/function names that reliably execute, especially the action vocabulary already familiar from MacroDroid/Android automation. Record inputs, outputs, parameters and failure modes.
+3. **Bridge analysis:** inspect public AI Edge Gallery / FunctionGemma documentation and, if needed later, source code to determine exactly where model output becomes an OS/app intent and what validation/execution layer sits between them. Do not copy Google's implementation blindly.
+4. **AURA Action Contract:** design a stable internal schema for `intent -> action/function -> parameters -> authorization -> execution -> result -> verification`. Keep it independent from any one model.
+5. **Bilingual boundary:** let Gemma own Turkish/multilingual understanding and planning; keep the action layer on a constrained, machine-readable vocabulary. If useful, add a deterministic alias/normalization layer so Turkish phrases map to canonical AURA actions without requiring the 270M model to become a Turkish chatbot.
+6. **Tool/Execution integration:** connect the canonical action contract to AURA's existing Tool/Execution Layer, Event Queue/ACK and verification flow. Preserve at-least-once delivery and authorization boundaries.
+7. **Native local inference spike:** evaluate the actual AURA integration path for Gemma/FunctionGemma (LiteRT/llama.cpp as appropriate), including Android 16 and 16 KB page-size requirements, without producing an APK yet.
+8. **Security gate:** implement/verify per-action authorization, trusted-device policy, replay protection, key rotation and audit semantics before autonomous execution.
+9. **A54 end-to-end validation:** only after code/tests/CI/audit gates pass, test boot -> service -> bridge -> model -> action -> Android -> verification -> response on the physical device.
+10. **APK gate:** APK build/replacement remains last and only happens after explicit user request.
+
+## Current decision
+The two-model idea is now a **validated architectural direction / active spike**, not merely a speculative idea: the real-device test demonstrates a useful division of labor between a slower but capable Turkish/general model and a very small, fast action/function model. Integration is still explicitly deferred until the action vocabulary, bridge semantics and AURA action contract are understood.
+
+## 2026-10-05 change log
+- Added A54 Mobile Actions-270M test findings.
+- Promoted Gemma 4 E2B-it + Mobile Actions/FunctionGemma from a generic candidate idea to an evidence-backed architectural direction, while keeping implementation deferred.
+- Added action-vocabulary discovery, bridge analysis and model-independent AURA Action Contract as explicit roadmap gates.
+
