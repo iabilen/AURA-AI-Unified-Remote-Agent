@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { DurableEventStore } from "./event-store.js";
 import { WebSocketServer, WebSocket } from "ws";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
@@ -13,13 +14,14 @@ const PORT = Number(process.env.PORT ?? 8787);
 const MCP_TOKEN = process.env.AURA_MCP_TOKEN ?? "";
 const DEVICE_TOKENS = loadDeviceTokens();
 const EVENT_LIMIT = 200;
+const EVENT_STORE_PATH = process.env.AURA_EVENT_STORE_PATH ?? "./data/events.json";
 const TASK_TIMEOUT_MS = 60_000;
 
 if (MCP_TOKEN.length < 24) throw new Error("AURA_MCP_TOKEN must be at least 24 characters");
 if (Object.keys(DEVICE_TOKENS).length === 0) throw new Error("AURA_DEVICE_TOKENS must contain at least one device token");
 
 const devices = new Map<string, Device>();
-const events: JsonRecord[] = [];
+const eventStore = new DurableEventStore(EVENT_STORE_PATH, EVENT_LIMIT);
 const pendingTasks = new Map<string, PendingTask>();
 
 function loadDeviceTokens(): Record<string, string> {
@@ -51,9 +53,7 @@ function deviceTokenFor(id: string): string | undefined { return DEVICE_TOKENS[i
 
 function rememberEvent(event: JsonRecord, deviceId: string): string {
   const id = typeof event.id === "string" ? event.id : randomUUID();
-  if (events.some((item) => item.id === id && item.deviceId === deviceId)) return id;
-  events.push({ ...event, id, deviceId, receivedAt: Date.now() });
-  while (events.length > EVENT_LIMIT) events.shift();
+  eventStore.remember({ ...event, id, deviceId, receivedAt: Date.now() });
   return id;
 }
 
@@ -80,17 +80,15 @@ function connectDevice(id: string, socket: WebSocket) {
 }
 
 function buildMcpServer(): McpServer {
-  const server = new McpServer({ name: "aura-relay", version: "0.1.0", description: "Secure relay between ChatGPT MCP and AURA Android agents." });
+  const server = new McpServer({ name: "aura-relay", version: "0.1.0" });
 
   server.registerTool("aura_devices", {
     description: "List authorized AURA devices and their current connection state.",
     inputSchema: z.object({}),
-  }, async () => ({
-    content: [{ type: "text", text: JSON.stringify({
-      configured: Object.keys(DEVICE_TOKENS).filter((id) => id !== "*"),
-      connected: [...devices.values()].map((device) => ({ deviceId: device.id, connected: device.socket.readyState === WebSocket.OPEN, connectedAt: device.connectedAt, lastSeenAt: device.lastSeenAt })),
-    }) }],
-  }));
+  }, async () => ({ content: [{ type: "text", text: JSON.stringify({
+    configured: Object.keys(DEVICE_TOKENS).filter((id) => id !== "*"),
+    connected: [...devices.values()].map((device) => ({ deviceId: device.id, connected: device.socket.readyState === WebSocket.OPEN, connectedAt: device.connectedAt, lastSeenAt: device.lastSeenAt })),
+  }) }] }));
 
   server.registerTool("aura_status", {
     description: "Get the status of one connected AURA device.",
@@ -124,7 +122,7 @@ function buildMcpServer(): McpServer {
     description: "Read recent Android events received by AURA, including notifications.",
     inputSchema: z.object({ deviceId: z.string().optional(), limit: z.number().int().min(1).max(50).default(20) }),
   }, async ({ deviceId, limit }) => ({
-    content: [{ type: "text", text: JSON.stringify(events.filter((event) => !deviceId || event.deviceId === deviceId).slice(-limit)) }],
+    content: [{ type: "text", text: JSON.stringify(eventStore.list(deviceId, limit)) }],
   }));
 
   return server;
@@ -136,7 +134,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://aura.local");
   if (url.pathname === "/healthz") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, devices: devices.size, events: events.length }));
+    res.end(JSON.stringify({ ok: true, devices: devices.size, events: eventStore.count() }));
     return;
   }
   if (url.pathname !== "/mcp") { res.writeHead(404); res.end("not found"); return; }
