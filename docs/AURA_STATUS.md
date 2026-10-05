@@ -141,3 +141,47 @@ The architecture has now been **deliberately simplified** from a mandatory two-m
 - Promoted Gemma 4 E2B-it + Mobile Actions/FunctionGemma from a generic candidate idea to an evidence-backed architectural direction, while keeping implementation deferred.
 - Added action-vocabulary discovery, bridge analysis and model-independent AURA Action Contract as explicit roadmap gates.
 - 2026-10-05 18:05 UTC / 21:05 Türkiye: revised the architecture so the deterministic Intent/Command Router precedes model inference, Gemma is selective rather than mandatory for simple commands, and FunctionGemma/Mobile Actions 270M is optional rather than a required second model.
+
+## 2026-10-05 decision: single Brain + OpenAI/ChatGPT
+
+The user approved simplifying AURA around the original Brain and explicitly requested that the OpenAI/ChatGPT integration be included as the single external AI intelligence path. Gemma and FunctionGemma/Mobile Actions are no longer part of the intended AURA runtime architecture.
+
+### Design
+- Preserve `AuraRuntime → Brain → Tools → ActionGate → Android → Verification → Event Queue/ACK`.
+- Brain remains the central orchestration component; do not rewrite it into multiple new AI/agent layers.
+- Remove Gemma/local-LLM/FunctionGemma infrastructure only after a dependency audit proves each item is no longer required.
+- Integrate OpenAI/ChatGPT at the smallest practical Brain-facing boundary. Provider-specific code must not spread into Tools, Android services, Gate or Verification.
+- OpenAI/ChatGPT may reason, interpret context and propose tool/action work; existing authorization, execution and verification remain authoritative.
+- AURA persistent runtime memory remains device-local/offline. ChatGPT is not AURA memory.
+- API credentials must never be committed or packaged into the APK.
+- Network/API failure must fail safely and must never bypass authorization or claim an action succeeded without verification.
+
+### Implementation plan
+1. Inventory all Gemma, FunctionGemma/Mobile Actions, `LocalModelEngine`, llama.cpp/native inference, model presets and model-only dependencies.
+2. Map their consumers and classify each as removable, replaceable or still required.
+3. Audit the current Brain call path and identify the minimum provider integration point.
+4. Check current official OpenAI API documentation and select the smallest suitable API boundary for Brain.
+5. Define credential storage/provisioning, timeout/cancellation, network failure, privacy/logging and authorization handoff before live integration.
+6. Remove dead local-AI infrastructure in the smallest safe changeset.
+7. Connect the existing Brain to OpenAI/ChatGPT without redesigning the rest of AURA.
+8. Add focused tests for provider success/failure, malformed output, timeout/cancellation, offline behavior, authorization rejection and verification failure.
+9. Re-scan for dead Gemma/model references, secrets and accidental changes to Queue/ACK, Gate, Tools and Verification.
+10. Run CI/audit gates. No APK build at this stage.
+11. Only after gates pass, and only if the user explicitly asks, produce an APK and later perform A54 physical validation.
+
+### Acceptance criteria
+- No Gemma or FunctionGemma model is required for normal AURA operation.
+- No unnecessary local LLM runtime remains after dependency audit.
+- Brain remains recognizable and behaviorally central.
+- OpenAI/ChatGPT is the single external AI intelligence path.
+- Tools, ActionGate, Android execution, Verification and Event Queue/ACK remain authoritative.
+- No API secret reaches GitHub or the APK.
+- Provider/network failures are explicit and safe.
+- Changed-path tests pass and unrelated baseline failures remain documented.
+- No APK is built/replaced without explicit user request.
+
+### Process state
+This is the written design/spec requested by the user. Implementation has not started. The next formal gate is review/approval of this written spec; after approval, create the detailed implementation plan and only then select the execution method before code changes.
+
+## Change log
+- 2026-10-05 18:24 UTC / 21:24 Türkiye: user approved the single-Brain direction, requested removal of Gemma and integration of OpenAI/ChatGPT as the single external AI path, and asked for the plan to be recorded.
