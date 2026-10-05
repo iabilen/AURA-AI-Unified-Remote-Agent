@@ -34,5 +34,7 @@ jobs:
         run: npm run test:registry
       - name: Database tests
         run: npm run test:database
+      - name: Relay shutdown regression
+        run: npm run test:shutdown
       - name: Relay smoke test
         run: node smoke-test.mjs

@@ -11,20 +11,21 @@
     "typecheck": "tsc --noEmit",
     "test:registry": "tsx device-registry-test.ts",
     "start": "tsx src/index.ts",
-    "test:database": "tsx database-test.ts"
+    "test:database": "tsx database-test.ts",
+    "test:shutdown": "node shutdown-test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "latest",
     "@modelcontextprotocol/server": "latest",
     "ws": "latest",
-    "zod": "latest",
-    "pg": "^8.23.1"
+    "zod": "^4.23.1",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/node": "latest",
     "@types/ws": "latest",
+    "@types/pg": "^8.15.5",
     "tsx": "latest",
-    "typescript": "latest",
-    "@types/pg": "^8.23.1"
+    "typescript": "latest"
   }
 }
