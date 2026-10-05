@@ -56,6 +56,9 @@ jobs:
           rm -rf "$HOME/llama-android"
           cmake --install "$RUNNER_TEMP/llama-build" --prefix "$HOME/llama-android"
           test -f "$HOME/llama-android/lib/libllama.a"
+      - name: Android unit tests
+        working-directory: ultra-native
+        run: bash ./gradlew :app:testDebugUnitTest --no-daemon
       - name: Assemble debug APK
         working-directory: ultra-native
         run: bash ./gradlew assembleDebug --no-daemon
