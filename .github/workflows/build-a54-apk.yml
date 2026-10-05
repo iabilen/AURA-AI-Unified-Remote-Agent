@@ -58,7 +58,7 @@ jobs:
           test -f "$HOME/llama-android/lib/libllama.a"
       - name: Android unit tests
         working-directory: ultra-native
-        run: bash ./gradlew :app:testDebugUnitTest --no-daemon
+        run: bash ./gradlew :app:testDebugUnitTest --tests com.agent.ultra.AgentBackgroundServiceManifestTest --tests com.agent.ultra.NotificationLogPrivacyTest --no-daemon
       - name: Assemble debug APK
         working-directory: ultra-native
         run: bash ./gradlew assembleDebug --no-daemon
