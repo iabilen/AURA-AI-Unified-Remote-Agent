@@ -23,3 +23,7 @@ npm run typecheck
 npm run test:registry
 npm run start
 ```
+
+## Relay database
+
+The relay supports PostgreSQL persistence through `AURA_RELAY_DATABASE_URL` (or `DATABASE_URL`). It creates the `aura_relay_devices`, `aura_relay_events`, and `aura_relay_tasks` tables automatically on startup. Device bearer credentials remain outside the database in the existing registry; secrets are never written to PostgreSQL. Without a database URL, the existing bounded file-backed event journal remains the local fallback.

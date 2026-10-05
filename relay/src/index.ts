@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { DurableEventStore } from "./event-store.js";
 import { DeviceRegistry } from "./device-registry.js";
+import { RelayDatabase } from "./relay-database.js";
 import { WebSocketServer, WebSocket } from "ws";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
@@ -17,6 +18,7 @@ const CONFIGURED_DEVICE_TOKENS = loadDeviceTokens();
 const EVENT_LIMIT = 200;
 const EVENT_STORE_PATH = process.env.AURA_EVENT_STORE_PATH ?? "./data/events.json";
 const DEVICE_REGISTRY_PATH = process.env.AURA_DEVICE_REGISTRY_PATH ?? "./data/devices.json";
+const RELAY_DATABASE_URL = process.env.AURA_RELAY_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
 const TASK_TIMEOUT_MS = 60_000;
 const PAIRING_TTL_MS = 5 * 60_000;
 
@@ -39,6 +41,8 @@ if (Object.keys(CONFIGURED_DEVICE_TOKENS).length === 0) throw new Error("AURA_DE
 const deviceRegistry = new DeviceRegistry(DEVICE_REGISTRY_PATH, CONFIGURED_DEVICE_TOKENS);
 const devices = new Map<string, Device>();
 const eventStore = new DurableEventStore(EVENT_STORE_PATH, EVENT_LIMIT);
+const relayDatabase = new RelayDatabase(RELAY_DATABASE_URL);
+await relayDatabase.init();
 const pendingTasks = new Map<string, PendingTask>();
 
 function loadDeviceTokens(): Record<string, string> {
@@ -60,9 +64,11 @@ function bearer(req: { headers: Record<string, string | string[] | undefined> })
   return typeof raw === "string" && raw.startsWith("Bearer ") ? raw.slice(7) : "";
 }
 
-function rememberEvent(event: JsonRecord, deviceId: string): string {
+async function rememberEvent(event: JsonRecord, deviceId: string): Promise<string> {
   const id = typeof event.id === "string" ? event.id : randomUUID();
-  eventStore.remember({ ...event, id, deviceId, receivedAt: Date.now() });
+  const receivedAt = Date.now();
+  eventStore.remember({ ...event, id, deviceId, receivedAt });
+  await relayDatabase.recordEvent(event, deviceId, id, receivedAt);
   return id;
 }
 
@@ -72,13 +78,15 @@ function send(ws: WebSocket, message: JsonRecord): boolean {
   return true;
 }
 
-function resultForTask(message: JsonRecord) {
+async function resultForTask(message: JsonRecord) {
   const id = typeof message.id === "string" ? message.id : "";
   const pending = pendingTasks.get(id);
   if (!pending) return;
   clearTimeout(pending.timer);
   pendingTasks.delete(id);
-  pending.resolve({ id, status: "completed", result: message.payload ?? message.result ?? null });
+  const result = message.payload ?? message.result ?? null;
+  await relayDatabase.completeTask(id, "completed", result && typeof result === "object" ? result as JsonRecord : null, Date.now());
+  pending.resolve({ id, status: "completed", result });
 }
 
 function connectDevice(id: string, socket: WebSocket) {
@@ -86,6 +94,7 @@ function connectDevice(id: string, socket: WebSocket) {
   if (old?.socket.readyState === WebSocket.OPEN) old.socket.close(4001, "replaced");
   const now = Date.now();
   devices.set(id, { id, socket, connectedAt: now, lastSeenAt: now });
+  void relayDatabase.recordDevice(id, true, now, now);
 }
 
 function buildMcpServer(): McpServer {
@@ -161,6 +170,7 @@ function buildMcpServer(): McpServer {
     const device = devices.get(deviceId);
     if (!device || device.socket.readyState !== WebSocket.OPEN) return { content: [{ type: "text", text: JSON.stringify({ status: "offline", deviceId }) }], isError: true };
     const id = randomUUID();
+    await relayDatabase.recordTask(id, deviceId, "mcp", task, Date.now());
     const result = await new Promise<JsonRecord>((resolve) => {
       const timer = setTimeout(() => { pendingTasks.delete(id); resolve({ id, status: "timeout", deviceId }); }, TASK_TIMEOUT_MS);
       pendingTasks.set(id, { resolve, timer });
@@ -175,7 +185,7 @@ function buildMcpServer(): McpServer {
     description: "Read recent Android events received by AURA, including notifications.",
     inputSchema: z.object({ deviceId: z.string().optional(), limit: z.number().int().min(1).max(50).default(20) }),
   }, async ({ deviceId, limit }) => ({
-    content: [{ type: "text", text: JSON.stringify(eventStore.list(deviceId, limit)) }],
+    content: [{ type: "text", text: JSON.stringify(relayDatabase.enabled ? await relayDatabase.listEvents(deviceId, limit) : eventStore.list(deviceId, limit)) }],
   }));
 
   return server;
@@ -187,7 +197,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://aura.local");
   if (url.pathname === "/healthz") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, devices: devices.size, events: eventStore.count() }));
+    res.end(JSON.stringify({ ok: true, devices: devices.size, events: eventStore.count(), database: relayDatabase.enabled }));
     return;
   }
   if (url.pathname === "/enroll" && req.method === "POST") {
@@ -232,21 +242,26 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws: WebSocket, _req: IncomingMessage, deviceId: string) => {
   connectDevice(deviceId, ws);
   send(ws, { type: "hello", protocol: 1, deviceId, capabilities: { task: true, event: true, status: true } });
-  ws.on("message", (raw) => {
+  ws.on("message", async (raw) => {
     let message: JsonRecord;
     try { message = JSON.parse(raw.toString()) as JsonRecord; } catch { return; }
     const device = devices.get(deviceId);
     if (device) device.lastSeenAt = Date.now();
     if (message.type === "event" || message.type === "result") {
-      const id = rememberEvent(message, deviceId);
+      const id = await rememberEvent(message, deviceId);
       send(ws, { type: "ack", id, protocol: 1 });
-      if (message.type === "result") resultForTask(message);
+      if (message.type === "result") await resultForTask(message);
       return;
     }
-    if (message.type === "status") { rememberEvent(message, deviceId); return; }
+    if (message.type === "status") { await rememberEvent(message, deviceId); return; }
     if (message.type === "ping") send(ws, { type: "pong", id: message.id ?? null, protocol: 1 });
   });
-  ws.on("close", () => { if (devices.get(deviceId)?.socket === ws) devices.delete(deviceId); });
+  ws.on("close", () => {
+    if (devices.get(deviceId)?.socket === ws) {
+      devices.delete(deviceId);
+      void relayDatabase.recordDevice(deviceId, false, Date.now(), Date.now());
+    }
+  });
   ws.on("error", () => ws.close());
 });
 
@@ -255,3 +270,6 @@ server.listen(PORT, () => {
   console.log("MCP endpoint: /mcp");
   console.log("Device WebSocket endpoint: /device");
 });
+
+process.on("SIGTERM", () => { void relayDatabase.close(); });
+process.on("SIGINT", () => { void relayDatabase.close(); });
