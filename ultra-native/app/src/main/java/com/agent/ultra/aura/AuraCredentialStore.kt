@@ -2,6 +2,7 @@ package com.agent.ultra.aura
 
 import android.content.Context
 import android.util.Base64
+import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -36,7 +37,7 @@ internal class AuraCredentialStore(context: Context) {
 
     private fun encrypt(value: String): String {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
-        return Base64.encodeToString(cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+        return Base64.encodeToString(cipher.iv + cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8)), Base64.NO_WRAP)
     }
 
     private fun decrypt(value: String?): String? = try {
@@ -44,6 +45,6 @@ internal class AuraCredentialStore(context: Context) {
         val raw = Base64.decode(value, Base64.NO_WRAP)
         val iv = raw.copyOfRange(0, 12)
         val data = raw.copyOfRange(12, raw.size)
-        String(Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)) }.doFinal(data), Charsets.UTF_8)
+        String(Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)) }.doFinal(data), StandardCharsets.UTF_8)
     } catch (_: Exception) { null }
 }
