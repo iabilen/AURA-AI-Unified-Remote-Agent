@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.pm.ServiceInfo;
 import android.content.Intent;
 import android.os.Build;
 import android.os.Handler;
@@ -38,7 +39,11 @@ public class AgentBackgroundService extends Service {
             .setNumber(0)
             .setBadgeIconType(android.app.Notification.BADGE_ICON_NONE)
             .build();
-        startForeground(NOTIFICATION_ID, notification);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+        } else {
+            startForeground(NOTIFICATION_ID, notification);
+        }
         Log.i(TAG, "Background service started");
 
         EventTrigger.INSTANCE.registerDefaults();
