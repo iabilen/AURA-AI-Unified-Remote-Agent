@@ -9,6 +9,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -22,7 +24,7 @@ import kotlin.math.min
  *
  * The phone never opens a listening remote-control socket. AURA connects out to
  * a trusted relay using WSS and a per-device bearer token. Durable device events
- * are queued locally until the relay acknowledges them.
+ * remain queued locally until the relay acknowledges them.
  */
 class AuraBridgeClient(
     private val context: Context,
@@ -39,6 +41,7 @@ class AuraBridgeClient(
     }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val credentials = AuraCredentialStore(context)
     private val queue = AuraEventQueue(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
@@ -56,13 +59,31 @@ class AuraBridgeClient(
             prefs.edit().putString(DEVICE_ID, id).apply()
         }
 
+    suspend fun enroll(relayHttpEndpoint: String, pairingCode: String): Boolean {
+        require(relayHttpEndpoint.startsWith("https://")) { "AURA enrollment endpoint must use https://" }
+        val requestBody = "{\"pairingCode\":\"${pairingCode.trim().uppercase()}\",\"deviceId\":\"$deviceId\"}"
+        val request = Request.Builder().url(relayHttpEndpoint.trimEnd('/') + "/enroll")
+            .post(requestBody.toRequestBody("application/json".toMediaType())).build()
+        return runCatching {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use false
+                val token = org.json.JSONObject(response.body?.string().orEmpty()).optString("token")
+                if (token.length < 24) return@use false
+                credentials.putToken(token)
+                prefs.edit().putString(ENDPOINT, relayHttpEndpoint.replaceFirst("^https://".toRegex(), "wss://") + "/device").putString(TOKEN, "").apply()
+                reconnectAttempt = 0; reconnectEnabled = true; connect(); true
+            }
+        }.getOrDefault(false)
+    }
+
     fun configure(endpoint: String, token: String) {
         require(endpoint.startsWith("wss://")) { "AURA Bridge endpoint must use wss://" }
         require(token.length >= 24) { "AURA Bridge token is too short" }
         prefs.edit()
             .putString(ENDPOINT, endpoint.trim())
-            .putString(TOKEN, token)
+            .putString(TOKEN, "")
             .apply()
+        credentials.putToken(token)
         reconnectAttempt = 0
         reconnectEnabled = true
         connect()
@@ -71,7 +92,7 @@ class AuraBridgeClient(
     fun connect() {
         reconnectEnabled = true
         val endpoint = prefs.getString(ENDPOINT, null)?.trim().orEmpty()
-        val token = prefs.getString(TOKEN, null).orEmpty()
+        val token = credentials.getToken() ?: prefs.getString(TOKEN, null).orEmpty().also { if (it.isNotEmpty()) credentials.putToken(it) }
         if (endpoint.isEmpty() || token.isEmpty()) return
         if (!endpoint.startsWith("wss://")) {
             Log.w(TAG, "Bridge disabled: endpoint is not wss")
@@ -97,14 +118,18 @@ class AuraBridgeClient(
 
     fun isConfigured(): Boolean =
         !prefs.getString(ENDPOINT, null).isNullOrBlank() &&
-            !prefs.getString(TOKEN, null).isNullOrBlank()
+            !credentials.getToken().isNullOrBlank()
 
     fun isConnected(): Boolean = socket != null
 
-    /** Sends immediately when connected; otherwise persists the event for the next session. */
+    /**
+     * Persists first, then attempts immediate delivery. The relay ACK is the
+     * only operation allowed to remove the event from durable local storage.
+     */
     fun sendEvent(event: AuraEvent): Boolean {
+        queue.enqueue(event)
         val sent = socket?.send(event.toWireJson()) == true
-        if (!sent) queue.enqueue(event)
+        if (sent) queue.markInFlight(event.id)
         return sent
     }
 
@@ -125,6 +150,7 @@ class AuraBridgeClient(
     private fun flushQueue(webSocket: WebSocket) {
         for (event in queue.pending()) {
             if (!webSocket.send(event.toString())) break
+            queue.markInFlight(event.optString("id"))
         }
     }
 
@@ -171,6 +197,10 @@ class AuraBridgeClient(
             runCatching {
                 val message = JSONObject(text)
                 when (message.optString("type")) {
+                    "credential_rotated" -> message.optString("token").takeIf { it.length >= 24 }?.let {
+                        credentials.putToken(it)
+                        socket?.close(1000, "credential rotated")
+                    }
                     AuraBridgeProtocol.TYPE_TASK,
                     AuraBridgeProtocol.TYPE_EVENT -> message.toAuraEvent()?.let(core::publish)
                     AuraBridgeProtocol.TYPE_ACK -> queue.ack(message.optString("id").trim())

@@ -16,6 +16,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
+import com.agent.ultra.memory.ContinuityMemory
 
 /**
  * The brain: a 12-turn tool loop. Ported from the proven BrainExecutor.ts —
@@ -35,6 +36,7 @@ class Brain(private val appContext: Context, private val local: com.agent.ultra.
     /** Lessons served to the run in progress; their counts move when it ends. */
     @Volatile private var servedThisRun: List<String> = emptyList()
     private val recipes = Recipes(com.agent.ultra.data.UltraDatabase.get(appContext).recipes())
+    private val continuity = ContinuityMemory(appContext)
 
     /** Called with the final user-facing answer of a run. The voice session
      * speaks it; the chat screen speaks it when speak-back is enabled. */
@@ -112,6 +114,7 @@ class Brain(private val appContext: Context, private val local: com.agent.ultra.
         // last one. Secrets outliving the task that saw them would be a worse
         // thing than the leak this prevents.
         controller.forgetScreenSecrets()
+        continuity.recordRunStarted(userInput)
         // Experience: take in anything the laptop's Northstar sent, and if this message
         // corrects the last run, that correction is a lesson before anything else happens.
         importVerdict()
@@ -777,6 +780,7 @@ JSON:"""
         val learned = learnFromRun(userInput, runSteps, credited, naturalFinish)
         lastRun = LastRun(userInput, credited, served, learned, memoryKey, runSteps.toList())
         saveLastRun()
+        continuity.recordRunReturned(credited, toolSequence.size)
     }
 
     /** What the last run did to memory, kept so an outside verdict can take it back. */
@@ -1151,10 +1155,13 @@ JSON:"""
             add(controller.batteryStatus())
             controller.currentWifiSsid()?.let { add("WiFi: $it") }
         }.joinToString(" | ")
+        val continuityContext = continuity.promptContext()
 
         return """You are Ultra — a capable, concise AI agent controlling this Android phone.
 PHONE STATE: $env
 TODAY: $date at $time
+CONTINUITY MEMORY:
+$continuityContext
 
 FORMAT: To use a tool: {"tool":"name","params":{...}} — To talk: plain text. ONE tool call per response.
 

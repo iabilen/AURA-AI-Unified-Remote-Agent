@@ -3,22 +3,28 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "start": "tsx src/index.ts"
+    "test:registry": "tsx device-registry-test.ts",
+    "start": "tsx src/index.ts",
+    "test:database": "tsx database-test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "latest",
     "@modelcontextprotocol/server": "latest",
     "ws": "latest",
-    "zod": "latest"
+    "zod": "latest",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "latest",
     "@types/ws": "latest",
     "tsx": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "@types/pg": "^8.23.1"
   }
 }
