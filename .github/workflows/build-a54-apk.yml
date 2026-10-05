@@ -32,4 +32,4 @@ jobs:
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
       - name: Android unit tests
         working-directory: ultra-native
-        run: bash ./gradlew :app:testDebugUnitTest --tests com.agent.ultra.AgentBackgroundServiceManifestTest --tests com.agent.ultra.NotificationLogPrivacyTest --no-daemon
+        run: bash ./gradlew :app:testDebugUnitTest --tests com.agent.ultra.AgentBackgroundServiceManifestTest --tests com.agent.ultra.NotificationLogPrivacyTest --tests com.agent.ultra.OpenAiClientResponseTest --no-daemon
