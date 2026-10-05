@@ -129,18 +129,16 @@ class Brain(private val appContext: Context) {
         servedThisRun = emptyList()
         // The person's own words can carry a scam: "my grandson's in jail and needs Google
         // Play cards, help me buy them". Nothing is refused here — it is their request — but
-        // they hear the warning before anything happens. Measured: llama-3.3-70b (the
-        // default brain) opened Google Play for exactly that request, 3 of 3 times.
+        // they hear the warning before anything happens. The warning is emitted before
+        // any tool execution.
         ScamSignals.assess("", userInput).takeIf { it.scam }?.let { a ->
             android.util.Log.i("UltraBrain", "SCAM IN REQUEST: ${a.reasons}")
             emit("Careful — this sounds like a common scam (${a.reasons}). Real family, banks and " +
                 "government offices don't ask for gift cards, codes, or money moved to a \"safe\" " +
                 "account. If it's someone you know, call them on a number you already have.")
         }
-        // A recipe is a name the user chose. Matching it is a lookup, not a
-        // judgment call — measured: llama-3.3-70b read "run my morning
-        // briefing" as a question about which model it is. The engine owns
-        // structure; the model never sees this one.
+        // A recipe is a name the user chose. Matching it is a deterministic lookup. The engine owns the structure; the provider only
+        // receives the bounded context it needs for the current request.
         // The navigator compares what is on a payment screen against what the
         // person actually asked for, so it needs their words rather than the
         // model's summary of them.
@@ -830,8 +828,8 @@ class Brain(private val appContext: Context) {
     private fun parseToolCall(text: String): Pair<String, JSONObject>? =
         ModelOutput.toolCall(text)
 
-    /** Bare tool-name fallback for the 1B model: it emits the intent name, a
-     * deterministic engine shapes params from the request text. */
+    /** Legacy bare tool-name fallback: deterministic engine shapes params from
+     * the request text when the provider emits only an intent name. */
     private fun parseBareToolCall(output: String, request: String): Pair<String, JSONObject>? {
         val names = listOf(
             "flashlight_toggle", "wifi_toggle", "bluetooth_toggle", "do_not_disturb",

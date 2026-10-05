@@ -1,6 +1,6 @@
 # AURA — Current Status & Roadmap
 
-> Last updated: 2026-10-05 18:50 UTC / 2026-10-05 21:50 Türkiye (UTC+3)
+> Last updated: 2026-10-05 19:33 UTC / 2026-10-05 22:33 Türkiye (UTC+3)
 > Branch: `aura/pre-device-hardening-plan`
 > Rule: No APK build/replacement unless explicitly requested by the user.
 
@@ -32,14 +32,14 @@
 ## Remaining infrastructure roadmap
 1. Code/source/dependency/permissions/architecture audit.
 2. Focused hardening and regression tests; do not alter unrelated baseline failures.
-3. Android 16/native/16 KB checks: llama.cpp/Gemma compatibility, RAM, inference latency, context, continuous runtime and 16 KB page-size compatibility.
+3. Android 16/native/16 KB checks: Android runtime compatibility, app/dependency alignment, RAM, continuous runtime and 16 KB page-size compatibility.
 4. Security review: key rotation, replay protection, command authorization, trusted-device policy and broader audit.
 5. CI verification and documentation of known baseline failures; a narrowed focused suite is not the entire Android suite.
 6. APK only after preceding gates pass and only when explicitly requested by the user.
 7. A54 physical end-to-end test only after preceding gates.
 
 ## AI / agent work still to mature
-- Validate local LLM behavior on A54 for RAM, latency, context size and stability.
+- Validate the single Brain + OpenAI provider path for latency, context handling, cancellation, network failure and stability.
 - Complete autonomous loop: observe → understand → plan → choose action → authorize → execute → verify → respond/continue.
 - Complete advanced security hardening.
 
@@ -62,85 +62,11 @@ AURA runtime memory is standalone, offline and device-local. AURA must not depen
 
 These are internal maturity indicators, not project completion percentages.
 
-## Candidate architecture: Gemma + action layer → revised direction
-The A54 spike demonstrated a useful division of labor between a capable general/local model and a very small action/function model. However, the original two-model architecture is **not mandatory**.
+## Superseded local-model exploration
 
-The current preferred direction is:
+An earlier A54 exploration evaluated on-device model options and a possible two-model action pipeline. That direction was explicitly rejected in favor of the original single-Brain architecture. The exploration is retained only as historical context; it is not part of the current runtime design or roadmap.
 
-```text
-USER
-  ↓
-AURA Intent / Command Router
-  ├── Simple / known action
-  │      ↓
-  │   Canonical AURA Action
-  │
-  └── Complex / ambiguous request
-         ↓
-      Gemma 4 E2B-it
-         ↓
-    Canonical AURA Action
-         ↓
-     Authorization
-         ↓
-    Tool / Execution Layer
-         ↓
-       Android
-         ↓
-     Verification
-```
-
-### Architecture decisions
-- **270M FunctionGemma / Mobile Actions is optional, not mandatory.** AURA must not depend on it for normal operation.
-- **Gemma 4 E2B-it remains the candidate primary local/general model**, but it should be invoked selectively for complex, ambiguous, contextual or planning-heavy requests rather than every simple command.
-- **Deterministic Intent / Command Router is introduced conceptually before any LLM.** Simple, explicitly supported commands should resolve directly to canonical actions without model inference.
-- **AURA Action Contract is model-independent.** It is the stable boundary between intent interpretation and authorization/execution.
-- FunctionGemma/Mobile Actions 270M may later be plugged in as an alternative action engine if controlled benchmarks demonstrate a real benefit in speed, accuracy, battery use or coverage.
-- The Tool/Execution layer remains responsible for authorization and actual Android execution; models do not bypass it.
-- No model-specific output format should become the internal AURA contract.
-
-### Why this direction
-The A54 spike showed that Gemma 4 E2B-it is useful for Turkish understanding and user-provided context, but noticeably slower on-device, while Mobile Actions 270M can execute specialized action/function commands but is currently unreliable for Turkish natural-language commands. This supports selective model invocation and a constrained canonical action vocabulary rather than making a 270M model a required conversational layer.
-
-Google's current public Mobile Actions documentation describes FunctionGemma as a specialized 270M function-calling model that maps natural-language commands to OS tools/app intents on-device. That validates the role of a small action model, but does not require AURA to adopt Google's model as a mandatory architectural component.
-
-## A54 Mobile Actions / FunctionGemma spike findings
-- 2026-10-05 UTC+3: User tested Google AI Edge Gallery on the A54 with Gemma 4 E2B-it and Mobile Actions-270M.
-- Gemma 4 E2B-it: good Turkish understanding and good use of user-provided `otobiyografik.txt` context, but noticeably slower on-device.
-- Mobile Actions-270M: action/function commands execute successfully; user confirmed English commands and MacroDroid-style action names such as `turnOnFlashlight` work. Turkish natural-language commands are currently unreliable/not understood in the same way.
-- Current interpretation: Mobile Actions should be treated as a specialized action/function interface, not as AURA's Turkish conversational brain.
-- The exact internal implementation of Google AI Edge Gallery's execution bridge is not reverse-engineered. Public Google material establishes the model → function-call → application/OS execution pattern; deeper internal layering remains a hypothesis until source-level inspection or controlled tests establish it.
-- No AURA code has been changed from this spike. No APK build/replacement is authorized.
-
-## Revised AURA AI/action roadmap
-1. **A54 model spike (current):** benchmark Gemma 4 E2B-it and Mobile Actions-270M for latency, RAM, heat, battery impact, context behavior and reliability.
-2. **Action vocabulary discovery:** enumerate actions/functions that can reliably execute and record inputs, outputs, parameters and failure modes.
-3. **Intent Router design:** define which commands can be resolved deterministically and which require model interpretation/planning.
-4. **AURA Action Contract:** define `intent → action/function → parameters → authorization → execution → result → verification`, independent of any model.
-5. **Bilingual boundary:** allow Gemma to own Turkish/multilingual understanding and planning; keep execution-facing action names constrained and machine-readable. Add deterministic aliases/normalization where useful.
-6. **Tool/Execution integration:** connect the canonical action contract to AURA's existing Tool/Execution Layer, Event Queue/ACK and verification flow. Preserve at-least-once delivery and authorization boundaries.
-7. **Optional action-engine spike:** evaluate 270M FunctionGemma/Mobile Actions only as a plugin/alternative against the same AURA Action Contract. Remove it from the critical path if it provides no measurable benefit.
-8. **Native local inference spike:** evaluate the actual AURA integration path for Gemma and optional action models (LiteRT/llama.cpp as appropriate), including Android 16 and 16 KB page-size requirements, without producing an APK yet.
-9. **Security gate:** verify per-action authorization, trusted-device policy, replay protection, key rotation and audit semantics before autonomous execution.
-10. **A54 end-to-end validation:** only after code/tests/CI/audit gates pass, test boot → service → bridge → router/model → action → Android → verification → response on the physical device.
-11. **APK gate:** APK build/replacement remains last and requires explicit user request.
-
-## Current decision
-The architecture has now been **deliberately simplified** from a mandatory two-model pipeline to a model-independent action architecture:
-
-- Simple deterministic commands should not require Gemma or FunctionGemma.
-- Complex requests may use Gemma 4 E2B-it to understand, reason and plan.
-- FunctionGemma/Mobile Actions 270M is an optional specialized action engine, not a required AURA component.
-- The AURA Action Contract and Tool/Execution Layer are the stable core.
-- Integration is still deferred until the action vocabulary, contract, bridge semantics and A54/native inference constraints are validated.
-
-## Change log
-- 2026-10-05 16:48 UTC / 19:48 Türkiye: canonical status/roadmap document created on the hardening branch.
-- Added persistent instruction: when the user says “save” or “not forget” about AURA-related information, decisions, plans or status, update this canonical file with the relevant item and timestamp.
-- Added A54 Mobile Actions-270M test findings.
-- Promoted Gemma 4 E2B-it + Mobile Actions/FunctionGemma from a generic candidate idea to an evidence-backed architectural direction, while keeping implementation deferred.
-- Added action-vocabulary discovery, bridge analysis and model-independent AURA Action Contract as explicit roadmap gates.
-- 2026-10-05 18:05 UTC / 21:05 Türkiye: revised the architecture so the deterministic Intent/Command Router precedes model inference, Gemma is selective rather than mandatory for simple commands, and FunctionGemma/Mobile Actions 270M is optional rather than a required second model.
+No local model is required by the current AURA runtime. The active architecture is the single Brain + OpenAI/ChatGPT path recorded below.
 
 ## 2026-10-05 decision: single Brain + OpenAI/ChatGPT
 
