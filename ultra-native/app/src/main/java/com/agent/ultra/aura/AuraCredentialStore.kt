@@ -17,13 +17,17 @@ internal class AuraCredentialStore(context: Context) {
 
     private fun key(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getKey(alias, null) as? SecretKey)?.let { return it }
+        val existing = ks.getKey(alias, null) as? SecretKey
+        if (existing != null) {
+            return existing
+        }
         val generator = KeyGenerator.getInstance("AES", "AndroidKeyStore")
         generator.init(
             android.security.keystore.KeyGenParameterSpec.Builder(
                 alias,
                 android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT
-            ).setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+            )
+                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
                 .build()
         )
@@ -34,9 +38,12 @@ internal class AuraCredentialStore(context: Context) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, key()) }
         return Base64.encodeToString(cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
     }
+
     private fun decrypt(value: String?): String? = try {
         if (value.isNullOrBlank()) return null
-        val raw = Base64.decode(value, Base64.NO_WRAP); val iv = raw.copyOfRange(0, 12); val data = raw.copyOfRange(12, raw.size)
+        val raw = Base64.decode(value, Base64.NO_WRAP)
+        val iv = raw.copyOfRange(0, 12)
+        val data = raw.copyOfRange(12, raw.size)
         String(Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)) }.doFinal(data), Charsets.UTF_8)
     } catch (_: Exception) { null }
 }
