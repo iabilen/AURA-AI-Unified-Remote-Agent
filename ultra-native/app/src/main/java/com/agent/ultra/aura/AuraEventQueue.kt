@@ -17,7 +17,9 @@ class AuraEventQueue(context: Context) {
     @Synchronized
     fun enqueue(event: AuraEvent) {
         val current = load()
-        if (current.any { it.optString("id") == event.id }) return
+        for (i in 0 until current.length()) {
+            if (current.optJSONObject(i)?.optString("id") == event.id) return
+        }
         current.put(event.toWireJson())
         while (current.length() > MAX_EVENTS) current.remove(0)
         save(current)
