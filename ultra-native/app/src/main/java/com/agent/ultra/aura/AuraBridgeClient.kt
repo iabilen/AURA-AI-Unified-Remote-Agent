@@ -166,7 +166,7 @@ class AuraBridgeClient(
                 when (message.optString("type")) {
                     AuraBridgeProtocol.TYPE_TASK,
                     AuraBridgeProtocol.TYPE_EVENT -> {
-                        core.publish(message.toAuraEvent())
+                        message.toAuraEvent()?.let(core::publish)
                     }
                     AuraBridgeProtocol.TYPE_PING -> {
                         sendPong(message.optString("id", null))
