@@ -5,7 +5,6 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.agent.ultra.aura.AuraConnectivityRecovery
-import com.agent.ultra.aura.AuraEvent
 import com.agent.ultra.aura.AuraLocationPresence
 import com.agent.ultra.aura.AuraPresenceStore
 import com.agent.ultra.aura.AuraRuntime
@@ -18,7 +17,7 @@ class UltraApplication : Application() {
             AuraRuntime.start(this)
             val store = AuraPresenceStore(this)
             AuraLocationPresence(this, AuraRuntime::publishEvent, store).start()
-            AuraConnectivityRecovery(this, AuraRuntime::publishEvent, { AuraRuntime.start(this) }, store).start()
+            AuraConnectivityRecovery(this, AuraRuntime::publishEvent, {}, store).start()
         } catch (e: Exception) {
             Log.w("UltraApp", "AURA runtime start failed", e)
         }
