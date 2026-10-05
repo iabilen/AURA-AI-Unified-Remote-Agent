@@ -15,6 +15,7 @@ class AuraEventQueue(context: Context) {
         private const val PREFS = "aura_event_queue"
         private const val KEY = "pending"
         private const val MAX_EVENTS = 100
+        private const val IN_FLIGHT = "inFlight"
         private val COALESCE_TYPES = setOf("battery", "power", "screen", "connectivity")
     }
 
@@ -26,7 +27,7 @@ class AuraEventQueue(context: Context) {
         for (i in 0 until current.length()) {
             val existing = current.optJSONObject(i) ?: continue
             if (existing.optString("id") == event.id) return
-            if (sameCoalesceKey(existing, event)) {
+            if (!existing.optBoolean(IN_FLIGHT, false) && sameCoalesceKey(existing, event)) {
                 current.put(i, event.toWireJson())
                 save(current)
                 return
@@ -36,6 +37,21 @@ class AuraEventQueue(context: Context) {
         current.put(event.toWireJson())
         trimToBound(current)
         save(current)
+    }
+
+    @Synchronized
+    fun markInFlight(id: String) {
+        if (id.isBlank()) return
+        val current = load()
+        for (i in 0 until current.length()) {
+            val item = current.optJSONObject(i) ?: continue
+            if (item.optString("id") == id) {
+                item.put(IN_FLIGHT, true)
+                current.put(i, item)
+                save(current)
+                return
+            }
+        }
     }
 
     @Synchronized
@@ -80,6 +96,7 @@ class AuraEventQueue(context: Context) {
             var oldestTimestamp = Long.MAX_VALUE
             for (i in 0 until current.length()) {
                 val item = current.optJSONObject(i) ?: continue
+                if (item.optBoolean(IN_FLIGHT, false)) continue
                 val priority = item.optInt("priority", 0)
                 val timestamp = item.optLong("timestampMs", Long.MAX_VALUE)
                 if (priority < lowestPriority ||
@@ -116,4 +133,5 @@ class AuraEventQueue(context: Context) {
         .put("timestampMs", timestampMs)
         .put("priority", priority)
         .put("payload", JSONObject(payload.toString()))
+        .put("inFlight", false)
 }

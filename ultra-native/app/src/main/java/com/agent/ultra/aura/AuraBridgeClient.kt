@@ -126,7 +126,9 @@ class AuraBridgeClient(
      */
     fun sendEvent(event: AuraEvent): Boolean {
         queue.enqueue(event)
-        return socket?.send(event.toWireJson()) == true
+        val sent = socket?.send(event.toWireJson()) == true
+        if (sent) queue.markInFlight(event.id)
+        return sent
     }
 
     fun sendStatus(): Boolean {
@@ -146,6 +148,7 @@ class AuraBridgeClient(
     private fun flushQueue(webSocket: WebSocket) {
         for (event in queue.pending()) {
             if (!webSocket.send(event.toString())) break
+            queue.markInFlight(event.optString("id"))
         }
     }
 
