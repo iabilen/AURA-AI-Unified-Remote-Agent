@@ -65,3 +65,6 @@ These are internal maturity indicators, not project completion percentages.
 ## Change log
 - 2026-10-05 16:48 UTC / 19:48 Türkiye: canonical status/roadmap document created on the hardening branch.
 - Future current-state changes should update this file rather than creating competing status files unless a historical snapshot is intentionally needed.
+
+## Persistent instruction from user
+- 2026-10-05 16:51 UTC / 2026-10-05 19:51 Türkiye (UTC+3): When the user says to “save” or “not forget” AURA-related information, decisions, plans, or status, update this canonical `docs/AURA_STATUS.md` file with the relevant item and a timestamp; do not leave it only in chat.
