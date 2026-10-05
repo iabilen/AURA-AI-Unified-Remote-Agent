@@ -39,6 +39,7 @@ async function assertTerminates(signal) {
 
 try {
   await assertTerminates("SIGTERM");
+  await assertTerminates("SIGINT");
   console.log("shutdown regression passed");
 } finally {
   rmSync(dir, { recursive: true, force: true });
