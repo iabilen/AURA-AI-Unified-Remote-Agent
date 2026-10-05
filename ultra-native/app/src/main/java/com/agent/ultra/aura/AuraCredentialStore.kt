@@ -40,11 +40,20 @@ internal class AuraCredentialStore(context: Context) {
         return Base64.encodeToString(cipher.iv + cipher.doFinal(value.toByteArray(StandardCharsets.UTF_8)), Base64.NO_WRAP)
     }
 
-    private fun decrypt(value: String?): String? = try {
-        if (value.isNullOrBlank()) return null
-        val raw = Base64.decode(value, Base64.NO_WRAP)
-        val iv = raw.copyOfRange(0, 12)
-        val data = raw.copyOfRange(12, raw.size)
-        String(Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)) }.doFinal(data), StandardCharsets.UTF_8)
-    } catch (_: Exception) { null }
+    private fun decrypt(value: String?): String? {
+        return try {
+            if (value.isNullOrBlank()) return null
+            val raw = Base64.decode(value, Base64.NO_WRAP)
+            val iv = raw.copyOfRange(0, 12)
+            val data = raw.copyOfRange(12, raw.size)
+            String(
+                Cipher.getInstance("AES/GCM/NoPadding")
+                    .apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)) }
+                    .doFinal(data),
+                StandardCharsets.UTF_8
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
