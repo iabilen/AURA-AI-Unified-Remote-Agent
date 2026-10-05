@@ -285,5 +285,41 @@ server.listen(PORT, () => {
   console.log("Device WebSocket endpoint: /device");
 });
 
-process.on("SIGTERM", () => { void relayDatabase.close(); });
-process.on("SIGINT", () => { void relayDatabase.close(); });
+let shuttingDown = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  for (const [taskId, pending] of pendingTasks) {
+    clearTimeout(pending.timer);
+    pendingTasks.delete(taskId);
+    pending.resolve({ id: taskId, status: "offline", deviceId: pending.deviceId });
+  }
+
+  for (const device of devices.values()) {
+    try { device.socket.terminate(); } catch {}
+  }
+  devices.clear();
+
+  await Promise.all([
+    new Promise<void>((resolve) => {
+      try {
+        server.close(() => resolve());
+        server.closeAllConnections?.();
+      } catch {
+        resolve();
+      }
+    }),
+    new Promise<void>((resolve) => {
+      try { wss.close(() => resolve()); } catch { resolve(); }
+    }),
+  ]);
+
+  try { await relayDatabase.close(); } catch (error) {
+    console.error(`AURA relay database close failed during ${signal}:`, error);
+  }
+}
+
+process.once("SIGTERM", () => { void shutdown("SIGTERM"); });
+process.once("SIGINT", () => { void shutdown("SIGINT"); });
