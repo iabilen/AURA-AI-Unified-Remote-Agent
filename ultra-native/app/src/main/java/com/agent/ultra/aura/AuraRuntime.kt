@@ -2,7 +2,6 @@ package com.agent.ultra.aura
 
 import android.content.Context
 import com.agent.ultra.agent.Brain
-import com.agent.ultra.local.LocalModelEngine
 
 /** Process-level AURA runtime. A54 is only the first device body; this layer stays device-neutral. */
 object AuraRuntime {
@@ -54,8 +53,5 @@ object AuraRuntime {
         bridge.configure(endpoint, token)
     }
 
-    private fun brain(context: Context): Brain = brain ?: Brain(
-        context,
-        LocalModelEngine.shared(context),
-    ).also { attachBrain(it) }
+    private fun brain(context: Context): Brain = brain ?: Brain(context).also { attachBrain(it) }
 }

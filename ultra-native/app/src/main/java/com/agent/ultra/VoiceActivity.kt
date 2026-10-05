@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.agent.ultra.agent.Brain
-import com.agent.ultra.local.LocalModelEngine
 import com.agent.ultra.aura.AuraRuntime
 import com.agent.ultra.ui.ChatMessage
 import com.agent.ultra.ui.ChatStore
@@ -81,9 +80,8 @@ class VoiceActivity : ComponentActivity() {
                 var heard by remember { mutableStateOf("") }
                 var reply by remember { mutableStateOf("") }
 
-                val engine = remember { LocalModelEngine.shared(applicationContext) }
                 val brain = remember {
-                    Brain(applicationContext, engine).also { b ->
+                    Brain(applicationContext).also { b ->
                         AuraRuntime.attachBrain(b)
                         b.onAnswer = { text ->
                             reply = text

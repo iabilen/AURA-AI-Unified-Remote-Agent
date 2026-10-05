@@ -38,20 +38,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.agent.ultra.AgentAccessibilityService
 import com.agent.ultra.agent.Brain
-import com.agent.ultra.local.LocalModelEngine
 import com.agent.ultra.aura.AuraRuntime
 import kotlinx.coroutines.launch
 
 @Composable
 fun ChatScreen(
-    localEngine: LocalModelEngine,
     configVersion: Int,
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     // Rebuilt when the provider config changes (settings save bumps the key).
-    val brain = remember(configVersion) { Brain(context.applicationContext, localEngine).also(AuraRuntime::attachBrain) }
+    val brain = remember(configVersion) { Brain(context.applicationContext).also(AuraRuntime::attachBrain) }
 
     // Speak-back: off by default, switched on in Settings. The engine is built
     // once and torn down with the screen.
@@ -391,19 +389,7 @@ fun ChatScreen(
                     ChatStore.thinking.value = true
                     ChatStore.agentScope.launch {
                         try {
-                            if (text.startsWith("/local ")) {
-                                // Dev path: raw on-device generation
-                                val prompt = text.removePrefix("/local ").trim()
-                                val msg = ChatMessage(false, "")
-                                ChatStore.addToState(msg)
-                                val r = localEngine.generate(prompt, 300) { piece ->
-                                    ChatStore.appendTo(msg.id, piece)
-                                }
-                                r.onFailure { ChatStore.setText(msg.id, "Error: ${it.message}") }
-                                ChatStore.messageById(msg.id)?.let { ChatStore.persist(it) }
-                            } else {
-                                brain.run(text)
-                            }
+                            brain.run(text)
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Exception) {

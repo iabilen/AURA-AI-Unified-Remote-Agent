@@ -25,8 +25,8 @@ data class ProviderConfig(
         private const val K_KEY = "api_key"
         private const val K_MODEL = "model"
 
-        private const val DEFAULT_BASE = "https://api.venice.ai/api/v1"
-        private const val DEFAULT_MODEL = "llama-3.3-70b"
+        private const val DEFAULT_BASE = "https://api.openai.com/v1"
+        private const val DEFAULT_MODEL = "gpt-6-luna"
 
         fun load(context: Context): ProviderConfig {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

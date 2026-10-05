@@ -14,7 +14,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -23,10 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,14 +33,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import com.agent.ultra.local.LocalModelEngine
 import com.agent.ultra.provider.ProviderConfig
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(
-    localEngine: LocalModelEngine,
     onConfigSaved: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -61,9 +54,6 @@ fun SettingsScreen(
     var model by remember { mutableStateOf(cfg.model) }
     var savedFlash by remember { mutableStateOf(false) }
 
-    var downloading by remember { mutableStateOf(false) }
-    var progress by remember { mutableFloatStateOf(0f) }
-    var downloadError by remember { mutableStateOf<String?>(null) }
 
     androidx.compose.material3.Surface(
         modifier = Modifier.fillMaxSize(),
@@ -128,189 +118,6 @@ fun SettingsScreen(
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-        }
-
-        // ── On-device model ───────────────────────────────────────────
-        SectionTitle("ON-DEVICE MODEL")
-        Text(
-            "A small model that runs entirely on this phone — the offline brain. " +
-                "It answers simple device commands without touching the network, takes over " +
-                "when the cloud is unreachable, and runs anything you prefix with /local.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-        )
-
-        // Status refreshes while the screen is open — loading happens lazily on
-        // first use, so a fixed snapshot would say "not loaded" forever.
-        var statusTick by remember { mutableIntStateOf(0) }
-        LaunchedEffect(Unit) {
-            while (true) { statusTick++; kotlinx.coroutines.delay(1500) }
-        }
-        val onDisk = remember(statusTick, downloading) { localEngine.downloadedFileNames() }
-        val liveStatus = remember(statusTick, downloading) {
-            when {
-                localEngine.loaded ->
-                    "In memory and ready (${localEngine.modelFileSizeBytes / 1_048_576} MB)"
-                localEngine.modelPresent ->
-                    "Downloaded (${localEngine.modelFileSizeBytes / 1_048_576} MB) — loads on first use"
-                else -> "Not downloaded"
-            }
-        }
-        Text(localEngine.modelLabel, style = MaterialTheme.typography.bodyMedium)
-        Text(
-            liveStatus,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-        )
-        Text(
-            "\"Loads on first use\" is normal. The weights stay on disk until something " +
-                "needs them, then take a few seconds to map into memory and stay there " +
-                "until the app closes.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-        )
-
-        if (downloading) {
-            LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-            Text("Downloading… ${(progress * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
-        }
-        downloadError?.let {
-            Text("Download failed: $it", color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall)
-        }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!localEngine.modelPresent && !downloading) {
-                Button(onClick = {
-                    downloading = true; downloadError = null; progress = 0f
-                    scope.launch {
-                        localEngine.downloadModel { p ->
-                            // Hop to the main thread: Compose snapshot state is
-                            // not thread-safe and this fires from OkHttp's IO
-                            // thread throughout the download.
-                            scope.launch(kotlinx.coroutines.Dispatchers.Main) { progress = p }
-                        }.onFailure { downloadError = it.message }
-                        downloading = false
-                    }
-                }) { Text("Download") }
-            }
-            if (localEngine.loaded) {
-                OutlinedButton(onClick = { scope.launch { localEngine.unload() } }) { Text("Free memory") }
-            }
-        }
-
-        // Model chooser
-        var showModels by remember { mutableStateOf(false) }
-        var customUrl by remember { mutableStateOf("") }
-        TextButton(onClick = { showModels = !showModels }) {
-            Text(if (showModels) "Hide models" else "Change model")
-        }
-        if (showModels) {
-            val totalRam = remember { LocalModelEngine.totalRamBytes(context) }
-            Text(
-                "This phone has ${totalRam / (1024 * 1024)} MB of memory. Each model below is " +
-                    "marked for how it sits here. Downloading one does not delete the one you " +
-                    "have — switching back is instant, and only one is ever in memory.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-            for (m in LocalModelEngine.PRESETS) {
-                val here = m.fileName in onDisk
-                val current = m.fileName == localEngine.modelFileName
-                val fit = LocalModelEngine.fitFor(m, totalRam)
-                val fitLabel = when (fit) {
-                    com.agent.ultra.local.Fit.COMFORTABLE -> "fits comfortably"
-                    com.agent.ultra.local.Fit.TIGHT -> "tight — will run, may slow under load"
-                    com.agent.ultra.local.Fit.TOO_BIG -> "too big for this phone"
-                }
-                val fitColor = when (fit) {
-                    com.agent.ultra.local.Fit.COMFORTABLE -> MaterialTheme.colorScheme.primary
-                    com.agent.ultra.local.Fit.TIGHT -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
-                    com.agent.ultra.local.Fit.TOO_BIG -> MaterialTheme.colorScheme.error
-                }
-                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Text(
-                        m.label + if (current) "  ← in use" else "",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (current) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        "${m.approxMb} MB  ·  $fitLabel",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = fitColor,
-                    )
-                    Text(
-                        "${if (here) "on this phone" else "not downloaded"}\n${m.note}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (!current) {
-                            OutlinedButton(
-                                enabled = !downloading && fit != com.agent.ultra.local.Fit.TOO_BIG,
-                                onClick = { scope.launch {
-                                localEngine.selectModel(m)
-                                if (!localEngine.modelPresent) {
-                                    downloading = true; downloadError = null; progress = 0f
-                                    scope.launch {
-                                        localEngine.downloadModel { p ->
-                                            scope.launch(kotlinx.coroutines.Dispatchers.Main) { progress = p }
-                                        }.onFailure { downloadError = it.message }
-                                        downloading = false
-                                    }
-                                }
-                                statusTick++
-                            } }) { Text(if (here) "Use this" else "Download & use") }
-                        }
-                        if (here && !current) {
-                            TextButton(onClick = {
-                                java.io.File(context.filesDir, "models/" + m.fileName).delete()
-                                statusTick++
-                            }) { Text("Delete file") }
-                        }
-                    }
-                }
-            }
-            OutlinedTextField(
-                value = customUrl,
-                onValueChange = { customUrl = it },
-                label = { Text("Or paste a GGUF download URL") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(
-                enabled = customUrl.isNotBlank() && !downloading,
-                onClick = {
-                    val url = customUrl.trim()
-                    val name = url.substringAfterLast('/').substringBefore('?')
-                        .ifBlank { "custom-model.gguf" }
-                    downloading = true; downloadError = null; progress = 0f
-                    scope.launch {
-                        localEngine.selectModel(
-                            com.agent.ultra.local.ModelChoice(
-                                label = name.removeSuffix(".gguf"),
-                                url = url,
-                                fileName = name,
-                                approxMb = 0,
-                                note = "Custom",
-                            )
-                        )
-                        localEngine.downloadModel { p ->
-                            scope.launch(kotlinx.coroutines.Dispatchers.Main) { progress = p }
-                        }.onFailure { downloadError = it.message }
-                        downloading = false
-                        customUrl = ""
-                    }
-                },
-            ) { Text("Download custom model") }
-            Text(
-                "It must be a GGUF file this build's llama.cpp can read, and it has to fit " +
-                    "in memory alongside everything else. Anything past about 2 GB will " +
-                    "refuse to load on this phone.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
             )
         }
 

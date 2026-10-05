@@ -77,7 +77,7 @@ class ContinuityMemory(context: Context) {
 
 - AURA = AI Unified Remote Agent.
 - ChatGPT is the primary AI/orchestrator; AURA is the Android body/agent layer.
-- Gemma 3 1B is optional local fallback/continuity support, not the primary decision engine.
+- OpenAI is the single external AI intelligence path; AURA runtime memory remains local.
 - Device layer: Android events → AURA Event Bus → authenticated outbound relay/device channel → ChatGPT MCP → Brain.run().
 - Remote control remains authenticated and subject to the existing safety gate.
 - Runtime continuity is offline and device-local; this local store is AURA's only runtime memory source.

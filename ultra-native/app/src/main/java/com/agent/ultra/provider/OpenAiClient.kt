@@ -11,9 +11,12 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Minimal OpenAI-compatible chat client. One method: send a message list, get
- * the assistant's text back. Matches the contract the brain was proven against
- * (Venice llama-3.3-70b, /chat/completions, no streaming).
+ * Minimal direct OpenAI Responses API client used by the Brain.
+ *
+ * The Brain owns conversation history and sends a bounded message list on each
+ * turn. We deliberately do not use server-side conversations here: AURA's
+ * runtime memory remains device-local and OpenAI only receives the context
+ * needed for the current turn.
  */
 class OpenAiClient(private val config: ProviderConfig) {
 
@@ -30,73 +33,33 @@ class OpenAiClient(private val config: ProviderConfig) {
     suspend fun complete(
         messages: List<ChatMessage>,
         maxTokens: Int,
-        temperature: Double,
+        @Suppress("UNUSED_PARAMETER") temperature: Double,
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
-            val msgs = JSONArray()
+            val input = JSONArray()
+            val instructions = StringBuilder()
             for (m in messages) {
-                msgs.put(JSONObject().put("role", m.role).put("content", m.content))
-            }
-            val bodyJson = JSONObject()
-                .put("model", config.model)
-                .put("messages", msgs)
-                .put("max_tokens", maxTokens)
-                .put("temperature", temperature)
-                .put("stream", false)
-                .also { applyVeniceParameters(it) }
-
-            val req = Request.Builder()
-                .url(config.baseUrl.trimEnd('/') + "/chat/completions")
-                .addHeader("Authorization", "Bearer ${config.apiKey}")
-                .addHeader("Content-Type", "application/json")
-                .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-
-            http.newCall(req).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    return@withContext Result.failure(
-                        Exception("HTTP ${resp.code}: ${body.take(300)}")
+                if (m.role == "system") {
+                    if (instructions.isNotEmpty()) instructions.append("\n\n")
+                    instructions.append(m.content)
+                } else {
+                    input.put(
+                        JSONObject()
+                            .put("role", if (m.role == "assistant") "assistant" else "user")
+                            .put("content", m.content)
                     )
                 }
-                val text = JSONObject(body)
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .optString("content", "")
-                if (text.isBlank()) Result.failure(Exception("empty model response"))
-                else Result.success(text)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
 
-    /**
-     * Streaming variant: SSE deltas delivered via onToken, full text returned.
-     * Falls back to a clean failure if the endpoint can't stream.
-     */
-    suspend fun completeStreaming(
-        messages: List<ChatMessage>,
-        maxTokens: Int,
-        temperature: Double,
-        onToken: (String) -> Unit,
-    ): Result<String> = withContext(Dispatchers.IO) {
-        try {
-            val msgs = JSONArray()
-            for (m in messages) {
-                msgs.put(JSONObject().put("role", m.role).put("content", m.content))
-            }
             val bodyJson = JSONObject()
                 .put("model", config.model)
-                .put("messages", msgs)
-                .put("max_tokens", maxTokens)
-                .put("temperature", temperature)
-                .put("stream", true)
-                .also { applyVeniceParameters(it) }
+                .put("input", input)
+                .put("max_output_tokens", maxTokens)
+                .put("store", false)
+            if (instructions.isNotEmpty()) bodyJson.put("instructions", instructions.toString())
 
             val req = Request.Builder()
-                .url(config.baseUrl.trimEnd('/') + "/chat/completions")
+                .url(config.baseUrl.trimEnd('/') + "/responses")
                 .addHeader("Authorization", "Bearer ${config.apiKey}")
                 .addHeader("Content-Type", "application/json")
                 .post(bodyJson.toString().toRequestBody("application/json".toMediaType()))
@@ -104,51 +67,42 @@ class OpenAiClient(private val config: ProviderConfig) {
 
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    val body = resp.body?.string().orEmpty()
-                    return@withContext Result.failure(Exception("HTTP ${resp.code}: ${body.take(300)}"))
+                    return@withContext Result.failure(
+                        Exception("OpenAI HTTP ${resp.code}")
+                    )
                 }
-                val full = StringBuilder()
-                resp.body!!.source().use { source ->
-                    while (!source.exhausted()) {
-                        val line = source.readUtf8Line() ?: break
-                        if (!line.startsWith("data:")) continue
-                        val data = line.removePrefix("data:").trim()
-                        if (data == "[DONE]") break
-                        try {
-                            val delta = JSONObject(data)
-                                .getJSONArray("choices")
-                                .getJSONObject(0)
-                                .optJSONObject("delta")
-                                ?.optString("content", "") ?: ""
-                            if (delta.isNotEmpty()) {
-                                full.append(delta)
-                                onToken(delta)
-                            }
-                        } catch (_: Exception) { /* non-JSON SSE line skipped */ }
-                    }
-                }
-                if (full.isBlank()) Result.failure(Exception("empty stream"))
-                else Result.success(full.toString())
+                val body = resp.body?.string().orEmpty()
+                val text = extractOutputText(JSONObject(body))
+                if (text.isBlank()) Result.failure(Exception("OpenAI returned no text"))
+                else Result.success(text)
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.failure(Exception("OpenAI request failed: ${e.message ?: e::class.simpleName}"))
         }
     }
 
-    /**
-     * Venice prepends its own ~1000-token system prompt unless told not to.
-     * Measured on llama-3.3-70b: with it, prompt_tokens goes 26 -> 1081 and
-     * the model's chat template breaks outright (replies come back as
-     * "assistant<|end_header_id|>assistant..."), or it answers questions about
-     * itself instead of the user's. Ultra ships its own system prompt, so
-     * Venice's is turned off. Only sent to Venice hosts — other
-     * OpenAI-compatible servers reject unknown top-level fields.
-     */
-    private fun applyVeniceParameters(body: JSONObject) {
-        if (!config.baseUrl.contains("venice.ai", ignoreCase = true)) return
-        body.put(
-            "venice_parameters",
-            JSONObject().put("include_venice_system_prompt", false)
-        )
+    companion object {
+        /** Extracts assistant text from a Responses API JSON object. */
+        internal fun extractOutputText(body: JSONObject): String {
+            val output = body.optJSONArray("output") ?: return ""
+            val text = StringBuilder()
+            for (i in 0 until output.length()) {
+                val item = output.optJSONObject(i) ?: continue
+                val content = item.optJSONArray("content") ?: continue
+                for (j in 0 until content.length()) {
+                    val part = content.optJSONObject(j) ?: continue
+                    if (part.optString("type") == "output_text") {
+                        val value = part.optString("text")
+                        if (value.isNotEmpty()) {
+                            if (text.isNotEmpty()) text.append('\n')
+                            text.append(value)
+                        }
+                    }
+                }
+            }
+            return text.toString()
+        }
     }
 }

@@ -1,4 +1,4 @@
-name: Build AURA APK
+name: Verify AURA Android
 on:
   workflow_dispatch:
   push:
@@ -7,11 +7,9 @@ on:
       - 'ultra-native/**'
       - '.github/workflows/build-a54-apk.yml'
 concurrency:
-  group: aura-apk-${{ github.ref }}
+  group: aura-verify-${{ github.ref }}
   cancel-in-progress: true
 env:
-  NDK_VERSION: '29.0.14206865'
-  LLAMA_CPP_REF: master
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -32,43 +30,7 @@ jobs:
       - name: Install Android SDK packages
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0" "ndk;${NDK_VERSION}"
-      - name: Install native build tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
-      - name: Build llama.cpp for arm64
-        run: |
-          git clone --depth 1 --branch "${LLAMA_CPP_REF}" https://github.com/ggml-org/llama.cpp.git "$RUNNER_TEMP/llama.cpp"
-          cmake -S "$RUNNER_TEMP/llama.cpp" -B "$RUNNER_TEMP/llama-build" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/${NDK_VERSION}/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-28 \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DGGML_NATIVE=OFF \
-            -DGGML_OPENMP=OFF \
-            -DLLAMA_OPENSSL=OFF \
-            -DLLAMA_BUILD_TESTS=OFF \
-            -DLLAMA_BUILD_EXAMPLES=OFF \
-            -DLLAMA_BUILD_TOOLS=OFF \
-            -DLLAMA_BUILD_APP=OFF \
-            -DLLAMA_BUILD_SERVER=OFF
-          cmake --build "$RUNNER_TEMP/llama-build" --config Release --parallel 2
-          rm -rf "$HOME/llama-android"
-          cmake --install "$RUNNER_TEMP/llama-build" --prefix "$HOME/llama-android"
-          test -f "$HOME/llama-android/lib/libllama.a"
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
       - name: Android unit tests
         working-directory: ultra-native
         run: bash ./gradlew :app:testDebugUnitTest --tests com.agent.ultra.AgentBackgroundServiceManifestTest --tests com.agent.ultra.NotificationLogPrivacyTest --no-daemon
-      - name: Assemble debug APK
-        working-directory: ultra-native
-        run: bash ./gradlew assembleDebug --no-daemon
-      - name: Verify APK
-        run: |
-          test -s ultra-native/app/build/outputs/apk/debug/app-debug.apk
-          ls -lh ultra-native/app/build/outputs/apk/debug/app-debug.apk
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: aura-a54-debug
-          path: ultra-native/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error

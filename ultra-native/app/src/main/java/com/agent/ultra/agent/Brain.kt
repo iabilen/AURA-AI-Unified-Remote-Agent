@@ -25,7 +25,7 @@ import com.agent.ultra.memory.ContinuityMemory
  * detector, structured result feedback. Conversation-bleed fix in the port:
  * each request starts from a fresh message list with a capped history window.
  */
-class Brain(private val appContext: Context, private val local: com.agent.ultra.local.LocalModelEngine) {
+class Brain(private val appContext: Context) {
 
     private val controller = AgentController(appContext)
     private val tools: Tools
@@ -67,8 +67,8 @@ class Brain(private val appContext: Context, private val local: com.agent.ultra.
 
     val configured: Boolean get() = client != null
 
-    /** What the model chip shows: the cloud model, or the on-device one. */
-    val modelLabel: String get() = client?.modelName ?: "Gemma 3 1B (on-device)"
+    /** The configured external Brain model. */
+    val modelLabel: String get() = client?.modelName ?: "OpenAI not configured"
 
     /** Non-null while a confirmable policy-gate block waits on the operator.
      * The chat UI renders a confirm/cancel card from this. */
@@ -154,42 +154,8 @@ class Brain(private val appContext: Context, private val local: com.agent.ultra.
 
         val ai = client
         if (ai == null) {
-            // Offline/unconfigured path: the on-device model is the brain.
-            if (!local.ensureLoaded()) {
-                // The first thing a brand-new install says to whoever just
-                // fought their way past four Android warnings. "No AI provider
-                // configured and no on-device model present" is accurate and
-                // useless: it names two things they have never heard of and
-                // does not say where either lives.
-                answer(
-                    "I have no brain yet — that is the one thing you have to give me.\n\n" +
-                        "Open Settings (the gear, top right) and pick one:\n\n" +
-                        "• ON-DEVICE MODEL — download one and I run entirely on this phone, " +
-                        "no account and no internet needed afterwards. The list says which " +
-                        "ones fit this handset.\n" +
-                        "• AI PROVIDER — paste in a service's address and key, if you already " +
-                        "have one.\n\n" +
-                        "While you are there: I also need the accessibility service switched " +
-                        "on before I can see or touch any other app. Tap the red " +
-                        "\"agent: a11y off\" at the top of this screen and it takes you " +
-                        "straight to it."
-                )
-                return
-            }
-            emitLocal(userInput)
+            answer("OpenAI is not configured. Open Settings and add your OpenAI API key.")
             return
-        }
-
-        // Local-first routing: simple device commands run on the on-device
-        // model — faster, free, private, works offline. Complex or ambiguous
-        // requests go straight to the cloud loop. A local miss escalates.
-        // A big on-device model is the offline brain, not the fast path: it
-        // answers "what is my battery level" in tens of seconds where the cloud
-        // takes about one. Local-first only applies when it is actually first.
-        if (isSimpleLocalIntent(userInput) && local.suitableForFastPath && local.ensureLoaded()) {
-            val handled = runLocalLoop(userInput)
-            if (handled) return
-            emit("(on-device model couldn't map that — trying the cloud)")
         }
 
         // Fresh-window history: last exchanges from this conversation, char-capped.
@@ -466,132 +432,6 @@ class Brain(private val appContext: Context, private val local: com.agent.ultra.
         notifyAnswer(text)
     }
 
-    /** Direct local answer for the offline path — no tool loop at 1B scale. */
-    private suspend fun emitLocal(userInput: String) {
-        val msg = ChatMessage(false, "")
-        ChatStore.addToState(msg)
-        val prompt = "You are Ultra, a concise assistant on an offline Android phone. " +
-            "Answer briefly and honestly.\n\nUser: $userInput\nUltra:"
-        local.generate(prompt, 400) { piece ->
-            ChatStore.appendTo(msg.id, piece)
-        }.onFailure {
-            ChatStore.setText(msg.id, "Error: on-device model failed — ${it.message}")
-        }
-        val finalMsg = ChatStore.messageById(msg.id) ?: msg
-        ChatStore.persist(finalMsg)
-        notifyAnswer(finalMsg.text)
-    }
-
-    /** Conservative classifier: only commands that map cleanly to the local
-     * tool subset route on-device. Anything else goes cloud. */
-    private fun isSimpleLocalIntent(input: String): Boolean {
-        val u = input.lowercase()
-        // Compounds and URL-like targets exceed the 1B model's measured
-        // competence (suite t03/t05/t08): those go cloud.
-        if (Regex("\\b(and then|then|after that| and )\\b").containsMatchIn(u)) return false
-        if (Regex("[a-z0-9-]+\\.(com|org|net|io|edu|gov)\\b").containsMatchIn(u)) return false
-        if (u.contains("http")) return false
-        return Regex(
-            "\\b(flashlight|torch|wi-?fi|bluetooth|do not disturb|dnd|volume|brightness|" +
-                "airplane|alarm|timer|battery|clipboard|note this|open|launch|start)\\b"
-        ).containsMatchIn(u)
-    }
-
-    /** The on-device tool loop: compact catalog, max 2 turns, gate enforced. */
-    private suspend fun runLocalLoop(userInput: String): Boolean {
-        val episode = Gate.Episode(userInput)
-        // What worked before, for the 1B model too. One line, and only when a
-        // single tool is involved — this model follows a short concrete hint
-        // and drowns in a long one.
-        val recalled = try {
-            bestShortcut(userInput)?.first?.takeIf { !it.toolsCsv.contains("→") }?.toolsCsv
-        } catch (_: Exception) { null }
-        if (recalled != null) {
-            android.util.Log.i("UltraBrain", "MEMORY HINT (local): $recalled")
-        }
-        // Few-shot examples — 1B models map intents reliably with them, not
-        // without (measured: zero-shot picked flashlight_toggle for 'open
-        // chrome'). Trimmed catalog for the local route.
-        var prompt = """You are Ultra, an on-device Android agent. Reply with EXACTLY one JSON tool call and nothing else.
-
-TOOLS:
-flashlight_toggle {"on":true|false}
-wifi_toggle {"on":true|false}
-bluetooth_toggle {"on":true|false}
-do_not_disturb {"on":true|false}
-volume_set {"percent":0-100}
-alarm_set {"hour":0-23,"minute":0-59,"label":"..."}
-note_create {"text":"..."}
-app_launch {"target":"app name"}
-battery_status {}
-clipboard_read {}
-clipboard_write {"text":"..."}
-
-EXAMPLES:
-User: turn on the flashlight
-JSON: {"tool":"flashlight_toggle","params":{"on":true}}
-
-User: open chrome
-JSON: {"tool":"app_launch","params":{"target":"chrome"}}
-
-User: set an alarm for 7 30 am
-JSON: {"tool":"alarm_set","params":{"hour":7,"minute":30,"label":"Ultra alarm"}}
-
-User: what's my battery level
-JSON: {"tool":"battery_status","params":{}}
-
-User: turn off wifi
-JSON: {"tool":"wifi_toggle","params":{"on":false}}
-
-User: $userInput
-JSON:"""
-        if (recalled != null) {
-            prompt = prompt.replace(
-                "User: $userInput",
-                "A request like this previously worked with: $recalled\n\nUser: $userInput",
-            )
-        }
-        repeat(2) { attempt ->
-            val raw = local.generate(prompt, 200).getOrElse { return false }
-            // The 1B model keeps writing after its answer — it replays the
-            // few-shot examples as if the conversation continued. Cut at the
-            // first echoed turn so the logs and the parser see one answer.
-            val out = raw.split(Regex("""\n\s*(User|JSON)\s*:"""), limit = 2).first().trim()
-            android.util.Log.i("UltraBrain", "LOCAL turn $attempt: ${out.take(120)}")
-            // The 1B model reliably emits the tool NAME, not the JSON wrapper
-            // (measured on-device). Parse both: JSON first, bare name second —
-            // a deterministic engine shapes the params either way.
-            val call = parseToolCall(out) ?: parseBareToolCall(out, userInput) ?: run {
-                prompt += "\n\nThat was not a JSON tool call. Reply with ONLY the JSON."
-                return@repeat
-            }
-            val verdict = gate.enforceCall(episode, call.first, call.second)
-            if (!verdict.allowed) {
-                GateAuditLog.record(appContext, call.first, GateAuditLog.Outcome.BLOCKED, verdict.rule, episode.observations, verdict.riskScore)
-                android.util.Log.i("UltraGate", "LOCAL BLOCK ${call.first}: ${verdict.violations.firstOrNull()?.hint}")
-                emit("Blocked by policy gate: ${verdict.violations.firstOrNull()?.hint}")
-                return true
-            }
-            val localOutcome = if (verdict.autoApproved) GateAuditLog.Outcome.AUTO_APPROVED else GateAuditLog.Outcome.ALLOWED
-            if (verdict.autoApproved) android.util.Log.i("UltraGate", "LOCAL AUTO-APPROVE ${call.first} (risk=${verdict.riskScore?.total})")
-            GateAuditLog.record(appContext, call.first, localOutcome, verdict.rule, episode.observations, verdict.riskScore)
-            android.util.Log.i("UltraBrain", "LOCAL TOOL: ${call.first} ${call.second.toString().take(80)}")
-            val result = tools.execute(call.first, call.second)
-            episode.observeSecrets(result)
-            episode.observeTool(call.first, result.take(80))
-            val verification = verifyAction(call.first, call.second) ?: ""
-            val failed = result.startsWith("Error:")
-            answer((if (failed) "Tried on-device: $result" else "$result (on-device)") + verification)
-            android.util.Log.i("UltraBrain", "RUN COMPLETE (local, tool=${call.first}, ok=${!failed})")
-            // On-device runs feed task memory and the recipe buffer too —
-            // otherwise "save that as X" after a local command has nothing
-            // to save.
-            recordMemory(userInput, listOf(Triple(call.first, call.second, !failed)), !failed)
-            return true
-        }
-        return false
-    }
-
     private suspend fun runLoop(
         ai: OpenAiClient,
         userInput: String,
@@ -621,29 +461,13 @@ JSON:"""
 
         for (turn in startTurn until maxTurns) {
             val maxTokens = if (turn == 0) 2000 else if (turn >= maxTurns - 2) 2500 else 1500
-            // Stream the turn into a live bubble; the bubble is removed if the
-            // turn ends up being a tool call (raw JSON isn't user-facing).
-            val streamMsg = ChatMessage(false, "")
-            ChatStore.addToState(streamMsg)
-            val reply = ai.completeStreaming(messages, maxTokens, 0.2) { piece ->
-                ChatStore.appendTo(streamMsg.id, piece)
-            }.getOrElse {
-                ChatStore.removeById(streamMsg.id)
-                // Cloud failed (offline, quota, outage) — the on-device model
-                // answers what it can rather than dying.
-                if (local.ensureLoaded()) {
-                    emit("(cloud unreachable — answering on-device)")
-                    emitLocal(userInput)
-                } else {
-                    emit("Error: model call failed — ${it.message}")
-                }
+            val reply = ai.complete(messages, maxTokens, 0.2).getOrElse {
+                emit("Error: OpenAI call failed — ${it.message}")
                 return
             }
             val raw = reply.trim()
 
             val toolCall = parseToolCall(raw)
-            // Raw tool JSON is not user-facing — retract the bubble it streamed into.
-            if (toolCall != null) ChatStore.removeById(streamMsg.id)
 
             if (toolCall == null) {
                 // Push-once: user asked for an action, brain only described it

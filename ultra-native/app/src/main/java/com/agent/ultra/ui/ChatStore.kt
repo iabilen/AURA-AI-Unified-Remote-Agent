@@ -49,7 +49,7 @@ object ChatStore {
 
     /**
      * Compose snapshot state is not thread-safe. Streaming answers arrive on
-     * OkHttp's IO threads and the on-device model emits from its own worker,
+     * Provider answers arrive on OkHttp's IO threads, so every mutation of [messages] funnels through here.
      * so every mutation of [messages] funnels through here. Writing it from a
      * background thread crashes the process later, in the global snapshot
      * observer, far from the line that did it.

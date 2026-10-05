@@ -23,9 +23,7 @@ android {
         versionName = "2.4.0-a54.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
-        ndk { abiFilters += listOf(if (project.hasProperty("bench")) "x86_64" else "arm64-v8a") }
     }
-    ndkVersion = "29.0.14206865"
     signingConfigs {
         if (file("debug.keystore").exists()) {
             create("legacyDebug") {
@@ -62,7 +60,6 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt") } }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
 }
 
