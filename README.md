@@ -2,129 +2,66 @@
 
 > **ChatGPT'nin Android üzerindeki fiziksel ajanı.**
 
-AURA (AI Unified Remote Agent) is the second-stage evolution of the verified Ultra Agent Android foundation. The working Android agent remains intact while AURA adds the architecture needed for a secure, event-driven connection between **ChatGPT as the primary AI** and an Android device.
+AURA (AI Unified Remote Agent), doğrulanmış Ultra Agent Android temelinin üzerine kurulan tek-Brain mimarisidir. **Brain merkezi orkestratör olarak kalır; ikinci bir AI veya yeni bir agent framework eklenmez.**
 
-## Core architecture
-
-```text
-                    CHATGPT 🧠
-                        ↕
-                 AURA Relay / MCP
-                        ↕ WSS
-                Secure Task Bridge
-                        ↕
-                 AURA Event Bus
-                        ↕
-          Brain → Tools → AgentController
-                        ↕
-                    Android 📱
-```
-
-AURA is designed to be **device-independent**. The Galaxy A54 is the first physical body, not a permanent product limitation. A future phone, tablet, PC or other authorized device can become another AURA endpoint.
-
-## ChatGPT-first rule
-
-**ChatGPT is the main intelligence and decision layer.** AURA is the body: it observes authorized Android events, exposes eyes/hands/hardware capabilities and executes tasks through the existing safety path.
-
-The local Gemma/llama.cpp engine is **not the main AI**. It remains only as an optional on-device fallback/continuity component; AURA's remote decision architecture is built around ChatGPT.
-
-## Event-first assistant
+## Mimari
 
 ```text
-Android event
-     ↓
-AURA Notification/Event source
-     ↓
-durable local queue
-     ↓ WSS
-AURA Relay
-     ↓ MCP
-ChatGPT
-     ↓
-IGNORE / INFORM / ASK / ACT
-     ↓
-AURA → Brain.run() → Android
+User / Device Event
+        ↓
+      Brain
+        ↓
+      Tools
+        ↓
+   ActionGate
+        ↓
+     Android
+        ↓
+   Verification
+        ↓
+ Event Queue / ACK
 ```
 
-Notifications are the first wake source. The same event pipeline is intended for SMS, calls, calendar, battery/state changes and other authorized Android signals.
+Brain; mevcut araç döngüsünü, belleği, tarifleri, scam kontrollerini, güvenlik kapısını ve doğrulama akışını korur. AURA runtime içinde Gemma, FunctionGemma veya llama.cpp tabanlı yerel model bulunmaz.
 
-## Current relay
+## AI sağlayıcısı
 
-`relay/` is the first real external relay/MCP implementation:
+AURA, mevcut provider sınırı üzerinden **OpenAI Responses API** kullanır. Android istemcisi yalnızca mevcut tur için gerekli sınırlı konuşma bağlamını gönderir ve `store=false` kullanır; böylece AURA'nın çalışma zamanı sürekliliği cihaz-yerel kalır.
 
-- authenticated `/device` WebSocket endpoint for AURA phones;
-- authenticated `/mcp` remote MCP endpoint;
-- stable task IDs and device result correlation;
-- bounded recent event buffer;
-- `aura_devices`, `aura_status`, `aura_events`, `aura_send_task` tools;
-- independent GitHub Actions typecheck.
+Model kimliği yapılandırılabilir; mevcut varsayılan `gpt-6-luna`'dır. API anahtarı çalışma zamanında kullanıcı tarafından sağlanır; kaynak koda veya APK içine gömülmez. Sağlayıcı hatası başka bir AI'a otomatik geçiş yapmaz ve ActionGate/doğrulama katmanlarını bypass etmez.
 
-The phone is outbound-only: it never opens a public remote-control socket.
+## AURA'nın koruduğu yetenekler
 
-## Safety and privacy
+- İzin verilen Android araçlarını mevcut accessibility/device katmanı üzerinden çalıştırma.
+- Deterministik güvenlik kapısı.
+- İşlem sonrası doğrulama.
+- Event Queue / ACK semantiği.
+- Cihaz-yerel çalışma zamanı sürekliliği.
+- Mevcut chat ve voice yüzeyleri.
+- Başarılı görev dizileri ve rutinleri mevcut memory sistemi üzerinden hatırlama.
 
-Every remote task enters the existing AURA/Ultra Agent execution path. High-impact actions remain subject to its confirmation/safety behavior. Notification content is not sent anywhere unless the bridge is configured; when configured, the relay transport is authenticated.
+## Android 16 durumu
 
-A remote MCP server does not automatically force every ChatGPT client surface to wake on arbitrary external events. The relay therefore makes events durable and available to the supported MCP integration; true unsolicited host-side wake/subscription behavior depends on the capabilities of the target ChatGPT surface.
-
-## Foundation
-
-This repository was initialized from the last verified Etap 1 build:
-
-- Source: `iabilen/Ultra-Agent-A54chatgpt-source`
-- Baseline commit: `fec145251a37d51700429104f4f4d5c1d1101e6d`
-- Android: Kotlin + Jetpack Compose
-- Device control: Android AccessibilityService + existing AgentController
-- Safety: existing policy gate and confirmation flow are preserved
-- Optional local model: Gemma 3 1B via llama.cpp
-- License: AGPL-3.0
-
-The original package and internal class names are deliberately preserved during the foundation phase so that proven Android behavior is not destabilized.
-
-## Next stages
-
-1. Device pairing and revoke instead of bootstrap bearer tokens.
-2. Persistent foreground bridge lifecycle and battery-aware wake behavior.
-3. More event adapters: SMS, calls, calendar, battery/connectivity and boot.
-4. Camera/screen tools and on-demand visual input to ChatGPT.
-5. Event filtering and privacy policies before forwarding sensitive content.
-6. Durable relay-side storage and multi-device routing.
-7. Verified ChatGPT MCP/event subscription path for genuine proactive wake behavior.
-
-## Build
-
-The Android GitHub Actions workflow uses the verified toolchain:
-
+- `compileSdk = 36`
+- `targetSdk = 36`
+- `minSdk = 28`
 - JDK 17
-- Android API 36
-- NDK 29.0.14206865
-- arm64-v8a
-- minSdk 28
+- AGP 8.10.1
 
-From `ultra-native/`:
+Android 15+ 16 KB sayfa boyutu gereksinimi için AURA'nın kendi native LLM/CMake katmanı kaldırılmıştır; mevcut uygulama build'inde artık yerel model native runtime'ı bulunmaz.
 
-```bash
-./gradlew assembleDebug
-```
+## Doğrulama sınırları
 
-Relay typecheck:
+- Gerçek kullanıcı OpenAI credential'ı ile canlı API çağrısı henüz çalıştırılmadı.
+- Tam A54 fiziksel uçtan uca doğrulama henüz yapılmadı.
+- APK üretimi ayrı ve açıkça istenen son adımdır; normal doğrulama CI'ı APK yayınlamaz/üretmez.
 
-```bash
-cd relay
-npm install
-npm run typecheck
-```
+## Geliştirme kuralı
 
-## Project rule
+**AURA'yı gereksiz yere büyütme.** Mevcut `Brain → Tools → ActionGate → Android → Verification → Event Queue/ACK` zinciri korunur. Yeni AI, yeni agent katmanı veya gereksiz yeniden yazım ancak mevcut tasarım yetersizliği kanıtlanırsa gündeme gelir.
 
-**Do not rewrite the working agent unnecessarily.** AURA grows around the proven `Brain → Tools → AgentController` chain. Bridge, relay, event, camera and multi-device components stay thin and testable.
+APK, kullanıcı açıkça istemeden oluşturulmaz. Hardening çalışmaları onaylanan kapılar geçmeden `main` dalına birleştirilmez.
 
-## License and attribution
+## Lisans
 
-AURA preserves the upstream project's AGPL-3.0 licensing and attribution. See `LICENSE` and `NOTICE`.
-
----
-
-**AURA — AI Unified Remote Agent**
-
-ChatGPT's intelligence, AURA's Android body.
+AGPL-3.0. Kaynak proje ve atıf bilgileri `LICENSE` ve `NOTICE` dosyalarında korunur.

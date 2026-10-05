@@ -18,7 +18,7 @@ android {
     defaultConfig {
         applicationId = "com.agent.ultra.a54"
         minSdk = 28
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1601
         versionName = "2.4.0-a54.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
