@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage } from "node:http";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { DurableEventStore } from "./event-store.js";
 import { DeviceRegistry } from "./device-registry.js";
 import { WebSocketServer, WebSocket } from "ws";
@@ -18,6 +18,20 @@ const EVENT_LIMIT = 200;
 const EVENT_STORE_PATH = process.env.AURA_EVENT_STORE_PATH ?? "./data/events.json";
 const DEVICE_REGISTRY_PATH = process.env.AURA_DEVICE_REGISTRY_PATH ?? "./data/devices.json";
 const TASK_TIMEOUT_MS = 60_000;
+const PAIRING_TTL_MS = 5 * 60_000;
+
+const pairingCodes = new Map<string, { expiresAt: number }>();
+setInterval(() => { const now = Date.now(); for (const [code, entry] of pairingCodes) if (entry.expiresAt <= now) pairingCodes.delete(code); }, PAIRING_TTL_MS).unref();
+function newPairingCode(): string {
+  const code = randomBytes(5).toString("base64url").slice(0, 8).toUpperCase();
+  pairingCodes.set(code, { expiresAt: Date.now() + PAIRING_TTL_MS });
+  return code;
+}
+function consumePairingCode(code: string): boolean {
+  const entry = pairingCodes.get(code); pairingCodes.delete(code);
+  return !!entry && entry.expiresAt > Date.now();
+}
+function issueDeviceToken(): string { return randomBytes(32).toString("base64url"); }
 
 if (MCP_TOKEN.length < 24) throw new Error("AURA_MCP_TOKEN must be at least 24 characters");
 if (Object.keys(CONFIGURED_DEVICE_TOKENS).length === 0) throw new Error("AURA_DEVICE_TOKENS must contain at least one device token");
@@ -109,6 +123,26 @@ function buildMcpServer(): McpServer {
     return { content: [{ type: "text", text: JSON.stringify({ deviceId, status: "restored" }) }] };
   });
 
+  server.registerTool("aura_create_pairing_code", {
+    description: "Create a short-lived one-time AURA device enrollment code.",
+    inputSchema: z.object({}),
+  }, async () => ({ content: [{ type: "text", text: JSON.stringify({ code: newPairingCode(), expiresInSeconds: PAIRING_TTL_MS / 1000 }) }] }));
+
+  server.registerTool("aura_rotate_device_credential", {
+    description: "Rotate the credential for an enrolled AURA device; the new token is returned once.",
+    inputSchema: z.object({ deviceId: z.string().min(1) }),
+  }, async ({ deviceId }) => {
+    const token = issueDeviceToken();
+    if (!deviceRegistry.rotate(deviceId, token)) return { content: [{ type: "text", text: JSON.stringify({ deviceId, status: "not_rotatable" }) }], isError: true };
+    const device = devices.get(deviceId);
+    if (device?.socket.readyState === WebSocket.OPEN) {
+      send(device.socket, { type: "credential_rotated", protocol: 1, deviceId, token });
+      setTimeout(() => { if (device.socket.readyState === WebSocket.OPEN) device.socket.close(4004, "credential rotated"); }, 100);
+    }
+    devices.delete(deviceId);
+    return { content: [{ type: "text", text: JSON.stringify({ deviceId, status: "rotated", token }) }] };
+  });
+
   server.registerTool("aura_status", {
     description: "Get the status of one connected AURA device.",
     inputSchema: z.object({ deviceId: z.string().min(1) }),
@@ -156,6 +190,23 @@ const server = createServer(async (req, res) => {
     res.end(JSON.stringify({ ok: true, devices: devices.size, events: eventStore.count() }));
     return;
   }
+  if (url.pathname === "/enroll" && req.method === "POST") {
+    let body = ""; req.on("data", chunk => { body += chunk.toString(); if (body.length > 2048) req.destroy(); });
+    req.on("end", () => {
+      try {
+        const input = JSON.parse(body) as { pairingCode?: string; deviceId?: string };
+        const code = input.pairingCode?.trim().toUpperCase() ?? "";
+        const deviceId = input.deviceId?.trim() ?? "";
+        if (!deviceId || deviceId.length > 128 || !consumePairingCode(code)) { res.writeHead(401, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "invalid_pairing" })); return; }
+        const token = issueDeviceToken();
+        if (!deviceRegistry.enroll(deviceId, token)) { res.writeHead(409, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "device_already_enrolled" })); return; }
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ deviceId, token }));
+      } catch { res.writeHead(400); res.end("bad request"); }
+    });
+    return;
+  }
+
   if (url.pathname !== "/mcp") { res.writeHead(404); res.end("not found"); return; }
   const mcpBearer = Buffer.from(bearer(req));
   const mcpExpected = Buffer.from(MCP_TOKEN);
