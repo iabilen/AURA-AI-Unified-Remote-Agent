@@ -68,3 +68,10 @@ These are internal maturity indicators, not project completion percentages.
 
 ## Persistent instruction from user
 - 2026-10-05 16:51 UTC / 2026-10-05 19:51 Türkiye (UTC+3): When the user says to “save” or “not forget” AURA-related information, decisions, plans, or status, update this canonical `docs/AURA_STATUS.md` file with the relevant item and a timestamp; do not leave it only in chat.
+
+## Candidate architecture: Gemma + FunctionGemma action layer
+- 2026-10-05 17:11 UTC / 2026-10-05 20:11 Türkiye (UTC+3): User approved and requested persistence of a new AURA architecture idea: keep **Gemma 4 E2B-it** as the primary local/general-purpose model and evaluate **FunctionGemma / Mobile Actions 270M** as a separate, lightweight action/function-routing layer beside it.
+- Intended flow: Gemma handles language, reasoning and planning; the 270M action model maps suitable intents to structured tool/function calls; AURA's existing tool/execution layer performs the authorized Android action and returns the result to the main model.
+- Candidate responsibilities: fast local action routing/function calling for operations such as notifications, app actions, connectivity/device controls and other explicitly exposed AURA tools.
+- Status: **idea recorded, not implemented or integrated yet**. First validate Mobile Actions 270M on the A54 in AI Edge Gallery, then assess latency, RAM, heat, reliability and function-call quality before designing the AURA integration.
+- This does **not** authorize an APK build or replacement. APK generation remains gated by an explicit user request.
