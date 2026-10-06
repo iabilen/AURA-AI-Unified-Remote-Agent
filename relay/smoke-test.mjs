@@ -70,6 +70,13 @@ async function main() {
     if (afterRestart.events !== 1) throw new Error(`event was not durable across restart: ${afterRestart.events}`);
     const unauthorized = await fetch(`http://127.0.0.1:${port}/mcp`);
     if (unauthorized.status !== 401) throw new Error(`expected MCP auth 401, got ${unauthorized.status}`);
+    for (let i = 0; i < 5; i++) {
+      const response = await fetch(`http://127.0.0.1:${port}/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pairingCode: `invalid-${i}`, deviceId: `rate-limit-${i}` }) });
+      if (response.status !== 401) throw new Error(`expected enrollment attempt ${i + 1} to return 401, got ${response.status}`);
+    }
+    const rateLimited = await fetch(`http://127.0.0.1:${port}/enroll`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pairingCode: "invalid-final", deviceId: "rate-limit-final" }) });
+    if (rateLimited.status !== 429) throw new Error(`expected enrollment rate limit 429, got ${rateLimited.status}`);
+    if (!rateLimited.headers.get("retry-after")) throw new Error("expected Retry-After header on enrollment rate limit");
     const authorized = await fetch(`http://127.0.0.1:${port}/mcp`, { headers: { Authorization: `Bearer ${token}` } });
     if (authorized.status === 401) throw new Error("valid MCP token was rejected");
     console.log("AURA relay smoke test passed: event ACK, persistence, restart recovery, and MCP auth gate");

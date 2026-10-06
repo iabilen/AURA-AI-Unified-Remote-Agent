@@ -21,8 +21,11 @@ const DEVICE_REGISTRY_PATH = process.env.AURA_DEVICE_REGISTRY_PATH ?? "./data/de
 const RELAY_DATABASE_URL = process.env.AURA_RELAY_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
 const TASK_TIMEOUT_MS = 60_000;
 const PAIRING_TTL_MS = 5 * 60_000;
+const ENROLL_RATE_LIMIT_WINDOW_MS = 60_000;
+const ENROLL_RATE_LIMIT_MAX_FAILURES = 5;
 
 const pairingCodes = new Map<string, { expiresAt: number }>();
+const enrollmentFailures = new Map<string, { windowStartedAt: number; failures: number }>();
 setInterval(() => { const now = Date.now(); for (const [code, entry] of pairingCodes) if (entry.expiresAt <= now) pairingCodes.delete(code); }, PAIRING_TTL_MS).unref();
 function newPairingCode(): string {
   const code = randomBytes(5).toString("base64url").slice(0, 8).toUpperCase();
@@ -33,6 +36,31 @@ function consumePairingCode(code: string): boolean {
   const entry = pairingCodes.get(code); pairingCodes.delete(code);
   return !!entry && entry.expiresAt > Date.now();
 }
+function enrollmentClientKey(req: IncomingMessage): string {
+  return req.socket.remoteAddress ?? "unknown";
+}
+function checkEnrollmentRateLimit(key: string): { allowed: boolean; retryAfterSeconds: number } {
+  const now = Date.now();
+  const entry = enrollmentFailures.get(key);
+  if (!entry || now - entry.windowStartedAt >= ENROLL_RATE_LIMIT_WINDOW_MS) {
+    enrollmentFailures.set(key, { windowStartedAt: now, failures: 0 });
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  if (entry.failures >= ENROLL_RATE_LIMIT_MAX_FAILURES) {
+    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((ENROLL_RATE_LIMIT_WINDOW_MS - (now - entry.windowStartedAt)) / 1000)) };
+  }
+  return { allowed: true, retryAfterSeconds: 0 };
+}
+function recordEnrollmentFailure(key: string): void {
+  const now = Date.now();
+  const entry = enrollmentFailures.get(key);
+  if (!entry || now - entry.windowStartedAt >= ENROLL_RATE_LIMIT_WINDOW_MS) {
+    enrollmentFailures.set(key, { windowStartedAt: now, failures: 1 });
+    return;
+  }
+  entry.failures += 1;
+}
+function clearEnrollmentFailures(key: string): void { enrollmentFailures.delete(key); }
 function issueDeviceToken(): string { return randomBytes(32).toString("base64url"); }
 
 if (MCP_TOKEN.length < 24) throw new Error("AURA_MCP_TOKEN must be at least 24 characters");
@@ -207,18 +235,36 @@ const server = createServer(async (req, res) => {
     return;
   }
   if (url.pathname === "/enroll" && req.method === "POST") {
+    const clientKey = enrollmentClientKey(req);
+    const limit = checkEnrollmentRateLimit(clientKey);
+    if (!limit.allowed) {
+      res.writeHead(429, { "content-type": "application/json", "retry-after": String(limit.retryAfterSeconds), "cache-control": "no-store" });
+      res.end(JSON.stringify({ error: "too_many_enrollment_attempts", retryAfterSeconds: limit.retryAfterSeconds }));
+      return;
+    }
     let body = ""; req.on("data", chunk => { body += chunk.toString(); if (body.length > 2048) req.destroy(); });
     req.on("end", () => {
       try {
         const input = JSON.parse(body) as { pairingCode?: string; deviceId?: string };
         const code = input.pairingCode?.trim().toUpperCase() ?? "";
         const deviceId = input.deviceId?.trim() ?? "";
-        if (!deviceId || deviceId.length > 128 || !consumePairingCode(code)) { res.writeHead(401, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "invalid_pairing" })); return; }
+        if (!deviceId || deviceId.length > 128 || !consumePairingCode(code)) {
+          recordEnrollmentFailure(clientKey);
+          res.writeHead(401, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(JSON.stringify({ error: "invalid_pairing" }));
+          return;
+        }
         const token = issueDeviceToken();
-        if (!deviceRegistry.enroll(deviceId, token)) { res.writeHead(409, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "device_already_enrolled" })); return; }
+        if (!deviceRegistry.enroll(deviceId, token)) {
+          recordEnrollmentFailure(clientKey);
+          res.writeHead(409, { "content-type": "application/json", "cache-control": "no-store" });
+          res.end(JSON.stringify({ error: "device_already_enrolled" }));
+          return;
+        }
+        clearEnrollmentFailures(clientKey);
         res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
         res.end(JSON.stringify({ deviceId, token }));
-      } catch { res.writeHead(400); res.end("bad request"); }
+      } catch { recordEnrollmentFailure(clientKey); res.writeHead(400); res.end("bad request"); }
     });
     return;
   }
