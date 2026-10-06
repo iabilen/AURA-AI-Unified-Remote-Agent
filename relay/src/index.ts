@@ -26,7 +26,7 @@ const ENROLL_RATE_LIMIT_MAX_FAILURES = 5;
 
 const pairingCodes = new Map<string, { expiresAt: number }>();
 const enrollmentFailures = new Map<string, { windowStartedAt: number; failures: number }>();
-setInterval(() => { const now = Date.now(); for (const [code, entry] of pairingCodes) if (entry.expiresAt <= now) pairingCodes.delete(code); }, PAIRING_TTL_MS).unref();
+setInterval(() => { const now = Date.now(); for (const [code, entry] of pairingCodes) if (entry.expiresAt <= now) pairingCodes.delete(code); for (const [key, entry] of enrollmentFailures) if (now - entry.windowStartedAt >= ENROLL_RATE_LIMIT_WINDOW_MS) enrollmentFailures.delete(key); }, PAIRING_TTL_MS).unref();
 function newPairingCode(): string {
   const code = randomBytes(5).toString("base64url").slice(0, 8).toUpperCase();
   pairingCodes.set(code, { expiresAt: Date.now() + PAIRING_TTL_MS });
