@@ -143,6 +143,14 @@ class AuraBridgeClient(
             }
         }
         // A lost ACK is retried after the durable lease expires, including after process death.
+        if (batch.isNotEmpty()) scheduleLeaseRecovery(webSocket)
+    }
+
+    private fun scheduleLeaseRecovery(webSocket: WebSocket) {
+        scope.launch {
+            delay(65_000L)
+            if (reconnectEnabled && socket === webSocket) flushQueue(webSocket)
+        }
     }
 
     private fun scheduleReconnect() {
@@ -182,10 +190,7 @@ class AuraBridgeClient(
             sendStatus()
             flushQueue(webSocket)
             // Recover leases left by a previous socket/process after their bounded expiry.
-            scope.launch {
-                delay(65_000L)
-                if (reconnectEnabled && socket === webSocket) flushQueue(webSocket)
-            }
+            scheduleLeaseRecovery(webSocket)
             Log.i(TAG, "Bridge connected")
         }
 
