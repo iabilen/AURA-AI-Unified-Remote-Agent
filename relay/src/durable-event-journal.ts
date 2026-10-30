@@ -134,7 +134,7 @@ export class DurableEventJournal {
     }
 
     const seen = new Set<string>();
-    return rows.map((row) => {
+    const records = rows.map((row) => {
       if (!isRecord(row)) throw new Error("AURA relay journal contains a malformed record");
       const id = requiredString(row.id, "event ID");
       const deviceId = requiredString(row.deviceId, "device ID");
@@ -145,6 +145,11 @@ export class DurableEventJournal {
       this.assertEventSize(record);
       return record;
     });
+
+    // The legacy store was a bare JSON array. Replace it only after every row
+    // has passed validation and the complete versioned file is durably written.
+    if (Array.isArray(parsed)) this.persistAtomically(records);
+    return records;
   }
 
   private assertEventSize(record: JsonRecord): void {

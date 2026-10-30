@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { DurableEventStore } from "./event-store.js";
+import { DurableEventJournal } from "./durable-event-journal.js";
 import { WebSocketServer, WebSocket } from "ws";
 import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
@@ -13,7 +13,6 @@ type PendingTask = { resolve: (value: JsonRecord) => void; timer: NodeJS.Timeout
 const PORT = Number(process.env.PORT ?? 8787);
 const MCP_TOKEN = process.env.AURA_MCP_TOKEN ?? "";
 const DEVICE_TOKENS = loadDeviceTokens();
-const EVENT_LIMIT = 200;
 const EVENT_STORE_PATH = process.env.AURA_EVENT_STORE_PATH ?? "./data/events.json";
 const TASK_TIMEOUT_MS = 60_000;
 
@@ -21,7 +20,9 @@ if (MCP_TOKEN.length < 24) throw new Error("AURA_MCP_TOKEN must be at least 24 c
 if (Object.keys(DEVICE_TOKENS).length === 0) throw new Error("AURA_DEVICE_TOKENS must contain at least one device token");
 
 const devices = new Map<string, Device>();
-const eventStore = new DurableEventStore(EVENT_STORE_PATH, EVENT_LIMIT);
+// The journal opens the existing event-store path and atomically migrates the
+// legacy JSON array to the versioned journal format on startup.
+const eventJournal = new DurableEventJournal(EVENT_STORE_PATH);
 const pendingTasks = new Map<string, PendingTask>();
 
 function loadDeviceTokens(): Record<string, string> {
@@ -52,9 +53,9 @@ function bearer(req: { headers: Record<string, string | string[] | undefined> })
 function deviceTokenFor(id: string): string | undefined { return DEVICE_TOKENS[id] ?? DEVICE_TOKENS["*"]; }
 
 function rememberEvent(event: JsonRecord, deviceId: string): string {
-  const id = typeof event.id === "string" ? event.id : randomUUID();
-  eventStore.remember({ ...event, id, deviceId, receivedAt: Date.now() });
-  return id;
+  const id = typeof event.id === "string" && event.id.trim().length > 0 ? event.id : randomUUID();
+  const accepted = eventJournal.accept({ ...event, id }, deviceId);
+  return accepted.id;
 }
 
 function send(ws: WebSocket, message: JsonRecord): boolean {
@@ -122,7 +123,7 @@ function buildMcpServer(): McpServer {
     description: "Read recent Android events received by AURA, including notifications.",
     inputSchema: z.object({ deviceId: z.string().optional(), limit: z.number().int().min(1).max(50).default(20) }),
   }, async ({ deviceId, limit }) => ({
-    content: [{ type: "text", text: JSON.stringify(eventStore.list(deviceId, limit)) }],
+    content: [{ type: "text", text: JSON.stringify(eventJournal.list(deviceId, limit)) }],
   }));
 
   return server;
@@ -134,7 +135,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://aura.local");
   if (url.pathname === "/healthz") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, devices: devices.size, events: eventStore.count() }));
+    res.end(JSON.stringify({ ok: true, devices: devices.size, events: eventJournal.count() }));
     return;
   }
   if (url.pathname !== "/mcp") { res.writeHead(404); res.end("not found"); return; }
@@ -166,12 +167,27 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage, deviceId: string) =>
     const device = devices.get(deviceId);
     if (device) device.lastSeenAt = Date.now();
     if (message.type === "event" || message.type === "result") {
-      const id = rememberEvent(message, deviceId);
-      send(ws, { type: "ack", id, protocol: 1 });
-      if (message.type === "result") resultForTask(message);
+      try {
+        // ACK only after the event is durably accepted. A duplicate is also
+        // safe to ACK because its original copy is already on disk.
+        const id = rememberEvent(message, deviceId);
+        send(ws, { type: "ack", id, protocol: 1 });
+        if (message.type === "result") resultForTask(message);
+      } catch (error) {
+        console.error("AURA event was not ACKed; durable journal rejected it", error);
+        ws.close(1013, "durable journal unavailable");
+      }
       return;
     }
-    if (message.type === "status") { rememberEvent(message, deviceId); return; }
+    if (message.type === "status") {
+      try {
+        rememberEvent(message, deviceId);
+      } catch (error) {
+        console.error("AURA status was not persisted; closing for retry", error);
+        ws.close(1013, "durable journal unavailable");
+      }
+      return;
+    }
     if (message.type === "ping") send(ws, { type: "pong", id: message.id ?? null, protocol: 1 });
   });
   ws.on("close", () => { if (devices.get(deviceId)?.socket === ws) devices.delete(deviceId); });
