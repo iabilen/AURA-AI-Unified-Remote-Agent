@@ -8,6 +8,7 @@ import com.agent.ultra.aura.AuraEvent
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.security.KeyStore
@@ -152,8 +153,12 @@ class DurableEventOutbox(context: Context) {
     }
 
     private fun readRecords(): List<OutboxRecord> {
-        if (!atomicFile.baseFile.exists() && !atomicFile.backupFile.exists()) return emptyList()
-        val encrypted = atomicFile.openRead().use { it.readBytes() }
+        val encrypted = try {
+            // AtomicFile.openRead() restores its backup after an interrupted write.
+            atomicFile.openRead().use { it.readBytes() }
+        } catch (_: FileNotFoundException) {
+            return emptyList()
+        }
         require(encrypted.size <= MAX_ENCRYPTED_BYTES) { "AURA outbox exceeds the safety limit" }
 
         val root = JSONObject(String(decrypt(encrypted), Charsets.UTF_8))
