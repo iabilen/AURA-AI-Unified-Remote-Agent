@@ -179,15 +179,9 @@ wss.on("connection", (ws: WebSocket, _req: IncomingMessage, deviceId: string) =>
       }
       return;
     }
-    if (message.type === "status") {
-      try {
-        rememberEvent(message, deviceId);
-      } catch (error) {
-        console.error("AURA status was not persisted; closing for retry", error);
-        ws.close(1013, "durable journal unavailable");
-      }
-      return;
-    }
+    // Status frames are ephemeral connection telemetry, not durable events.
+    // Persisting every heartbeat/status update would exhaust the event journal.
+    if (message.type === "status") return;
     if (message.type === "ping") send(ws, { type: "pong", id: message.id ?? null, protocol: 1 });
   });
   ws.on("close", () => { if (devices.get(deviceId)?.socket === ws) devices.delete(deviceId); });
