@@ -135,6 +135,26 @@ function buildMcpServer(): McpServer {
     description: "Read recent persisted Android events received by AURA.",
     inputSchema: { deviceId: z.string().optional(), limit: z.number().int().min(1).max(50).default(20) },
   }, async ({ deviceId, limit }) => ({ content: [{ type: "text", text: JSON.stringify(eventJournal.list(deviceId, limit)) }] }));
+
+  server.registerTool("aura_claim_events", {
+    description: "Durably lease pending AURA events to one named consumer. Delivery is at-least-once; ACK only after processing.",
+    inputSchema: { consumerId: z.string().min(1).max(120), limit: z.number().int().min(1).max(100).default(20), leaseMs: z.number().int().min(1000).max(300000).default(30000) },
+  }, async ({ consumerId, limit, leaseMs }) => ({ content: [{ type: "text", text: JSON.stringify(eventJournal.claim(consumerId, limit, leaseMs)) }] }));
+
+  server.registerTool("aura_ack_event", {
+    description: "Acknowledge a durably leased event after successful processing. Requires matching consumer, device and event IDs.",
+    inputSchema: { consumerId: z.string().min(1).max(120), deviceId: z.string().min(1), eventId: z.string().min(1) },
+  }, async ({ consumerId, deviceId, eventId }) => ({ content: [{ type: "text", text: JSON.stringify({ acknowledged: eventJournal.acknowledge(consumerId, deviceId, eventId) }) }] }));
+
+  server.registerTool("aura_release_event", {
+    description: "Release a leased event for retry after a consumer processing failure.",
+    inputSchema: { consumerId: z.string().min(1).max(120), deviceId: z.string().min(1), eventId: z.string().min(1) },
+  }, async ({ consumerId, deviceId, eventId }) => ({ content: [{ type: "text", text: JSON.stringify({ released: eventJournal.release(consumerId, deviceId, eventId) }) }] }));
+
+  server.registerTool("aura_prune_consumed_events", {
+    description: "Remove only consumed events older than at least 24 hours. Pending or leased events are never removed.",
+    inputSchema: { retentionMs: z.number().int().min(86400000).max(31536000000) },
+  }, async ({ retentionMs }) => ({ content: [{ type: "text", text: JSON.stringify({ removed: eventJournal.pruneConsumed(retentionMs) }) }] }));
   return server;
 }
 

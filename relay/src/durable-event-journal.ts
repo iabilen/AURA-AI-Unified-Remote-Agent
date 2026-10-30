@@ -36,7 +36,8 @@ type JournalState = {
  * Records are never silently evicted. Capacity exhaustion is backpressure:
  * reject the new event and leave all existing records intact.
  *
- * This class is additive and is not wired into the existing relay entrypoint.
+ * Consumer leases and ACK state are stored in the same atomic journal. Pending
+ * records are never pruned; only explicitly consumed records may expire.
  */
 export class DurableEventJournal {
   private records: JsonRecord[];
@@ -99,6 +100,55 @@ export class DurableEventJournal {
       .filter((event) => !deviceId || event.deviceId === deviceId)
       .slice(-limit)
       .map((event) => ({ ...event }));
+  }
+
+  /** Claim pending records or reclaim expired leases. Claim state is durable before return. */
+  claim(consumerId: string, limit = 20, leaseMs = 30_000): JsonRecord[] {
+    if (!consumerId.trim()) throw new Error("AURA journal consumer ID is required");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("AURA journal claim limit must be 1..100");
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 300_000) throw new Error("AURA journal lease must be 1000..300000ms");
+    const now = Date.now();
+    const eligible = this.records.filter((row) => row.consumedAt === undefined &&
+      (typeof row.leaseUntil !== "number" || row.leaseUntil <= now || row.leaseOwner === consumerId)).slice(0, limit);
+    if (eligible.length === 0) return [];
+    const ids = new Set(eligible.map((row) => `${String(row.deviceId)}\u0000${String(row.id)}`));
+    const next = this.records.map((row) => ids.has(`${String(row.deviceId)}\u0000${String(row.id)}`)
+      ? { ...row, leaseOwner: consumerId, leaseUntil: now + leaseMs, deliveryAttempts: Number(row.deliveryAttempts ?? 0) + 1 }
+      : row);
+    this.persistAtomically(next);
+    this.records = next;
+    return this.records.filter((row) => ids.has(`${String(row.deviceId)}\u0000${String(row.id)}`)).map((row) => ({ ...row }));
+  }
+
+  acknowledge(consumerId: string, deviceId: string, eventId: string): boolean {
+    const index = this.records.findIndex((row) => row.deviceId === deviceId && row.id === eventId);
+    if (index < 0) return false;
+    const row = this.records[index];
+    if (row.consumedAt !== undefined) return true;
+    if (row.leaseOwner !== consumerId || typeof row.leaseUntil !== "number" || row.leaseUntil <= Date.now()) return false;
+    const next = this.records.map((item, i) => i === index ? { ...item, consumedAt: Date.now(), leaseOwner: null, leaseUntil: null } : item);
+    this.persistAtomically(next);
+    this.records = next;
+    return true;
+  }
+
+  release(consumerId: string, deviceId: string, eventId: string): boolean {
+    const index = this.records.findIndex((row) => row.deviceId === deviceId && row.id === eventId);
+    if (index < 0) return false;
+    const row = this.records[index];
+    if (row.consumedAt !== undefined || row.leaseOwner !== consumerId) return false;
+    const next = this.records.map((item, i) => i === index ? { ...item, leaseOwner: null, leaseUntil: null } : item);
+    this.persistAtomically(next);
+    this.records = next;
+    return true;
+  }
+
+  pruneConsumed(retentionMs: number, now = Date.now()): number {
+    if (!Number.isSafeInteger(retentionMs) || retentionMs < 86_400_000) throw new Error("AURA consumed-event retention must be at least 24 hours");
+    const next = this.records.filter((row) => row.consumedAt === undefined || typeof row.consumedAt !== "number" || now - row.consumedAt < retentionMs);
+    const removed = this.records.length - next.length;
+    if (removed > 0) { this.persistAtomically(next); this.records = next; }
+    return removed;
   }
 
   count(): number {
