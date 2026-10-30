@@ -15,7 +15,8 @@ object AuraRuntime {
     @Synchronized
     fun start(context: Context) {
         if (initialized) return
-        initialized = true
+        // Publish initialized only after every dependency is constructed and the
+        // bridge start has been attempted. A failure must remain retryable.
         val app = context.applicationContext
         core = AuraCore { id, task ->
             pendingId = id
@@ -23,6 +24,7 @@ object AuraRuntime {
         }
         bridge = AuraBridgeClient(app, core)
         bridge.connect()
+        initialized = true
     }
 
     /** Publish a device-side event without forcing the local model to load. */
