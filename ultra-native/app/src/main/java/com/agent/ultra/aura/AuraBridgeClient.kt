@@ -2,6 +2,7 @@ package com.agent.ultra.aura
 
 import android.content.Context
 import android.util.Log
+import com.agent.ultra.aura.v2.outbox.DurableEventOutbox
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,8 +22,8 @@ import kotlin.math.min
  * Secure outbound AURA bridge transport.
  *
  * The phone never opens a listening remote-control socket. AURA connects out to
- * a trusted relay using WSS and a per-device bearer token. Durable device events
- * are queued locally until the relay acknowledges them.
+ * a trusted relay using WSS and a per-device bearer token. Device events are
+ * encrypted and durably leased before send, then removed only on matching ACK.
  */
 class AuraBridgeClient(
     private val context: Context,
@@ -39,7 +40,7 @@ class AuraBridgeClient(
     }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private val queue = AuraEventQueue(context)
+    private val outbox = DurableEventOutbox(context)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -101,11 +102,16 @@ class AuraBridgeClient(
 
     fun isConnected(): Boolean = socket != null
 
-    /** Sends immediately when connected; otherwise persists the event for the next session. */
+    /** Durably accepts the event before attempting transport. True means stored, not remotely processed. */
     fun sendEvent(event: AuraEvent): Boolean {
-        val sent = socket?.send(event.toWireJson()) == true
-        if (!sent) queue.enqueue(event)
-        return sent
+        return try {
+            outbox.enqueue(event)
+            socket?.let(::flushQueue)
+            true
+        } catch (error: Exception) {
+            Log.w(TAG, "Bridge event was not durably queued")
+            false
+        }
     }
 
     fun sendStatus(): Boolean {
@@ -123,9 +129,20 @@ class AuraBridgeClient(
     }
 
     private fun flushQueue(webSocket: WebSocket) {
-        for (event in queue.pending()) {
-            if (!webSocket.send(event.toString())) break
+        if (webSocket !== socket) return
+        val batch = try {
+            outbox.claimBatch()
+        } catch (error: Exception) {
+            Log.e(TAG, "Durable event outbox unavailable; refusing to send", error)
+            return
         }
+        for (record in batch) {
+            if (webSocket !== socket || webSocket.send(record.event.toWireJson()).not()) {
+                runCatching { outbox.release(record.event.id) }
+                break
+            }
+        }
+        // A lost ACK is retried after the durable lease expires, including after process death.
     }
 
     private fun scheduleReconnect() {
@@ -164,6 +181,11 @@ class AuraBridgeClient(
             sendHello(webSocket)
             sendStatus()
             flushQueue(webSocket)
+            // Recover leases left by a previous socket/process after their bounded expiry.
+            scope.launch {
+                delay(65_000L)
+                if (reconnectEnabled && socket === webSocket) flushQueue(webSocket)
+            }
             Log.i(TAG, "Bridge connected")
         }
 
@@ -173,7 +195,9 @@ class AuraBridgeClient(
                 when (message.optString("type")) {
                     AuraBridgeProtocol.TYPE_TASK,
                     AuraBridgeProtocol.TYPE_EVENT -> message.toAuraEvent()?.let(core::publish)
-                    AuraBridgeProtocol.TYPE_ACK -> queue.ack(message.optString("id").trim())
+                    AuraBridgeProtocol.TYPE_ACK -> {
+                        if (outbox.acknowledge(message.optString("id").trim())) flushQueue(webSocket)
+                    }
                     AuraBridgeProtocol.TYPE_PING -> sendPong(message.optString("id", null))
                     AuraBridgeProtocol.TYPE_STATUS_REQUEST -> sendStatus()
                     else -> Unit

@@ -11,6 +11,7 @@ import com.agent.ultra.agent.EventTrigger
 import com.agent.ultra.aura.AuraEvent
 import com.agent.ultra.aura.AuraEventTypes
 import com.agent.ultra.aura.AuraRuntime
+import com.agent.ultra.aura.v2.policy.NotificationPrivacyPolicy
 import java.io.File
 
 /**
@@ -36,7 +37,7 @@ class UltraNotificationService : NotificationListenerService() {
             val title = extras.getCharSequence("android.title")?.toString() ?: ""
             val text = extras.getCharSequence("android.text")?.toString() ?: ""
 
-            publishAuraEvent(sbn, title, text)
+            publishAuraEvent(sbn)
             val warned = runTriggers(sbn.packageName, title, text)
 
             if (!com.agent.ultra.ui.UltraPrefs.captureNotifications(this)) return
@@ -58,16 +59,15 @@ class UltraNotificationService : NotificationListenerService() {
         }
     }
 
-    private fun publishAuraEvent(sbn: StatusBarNotification, title: String, text: String) {
-        val priority = when {
-            sbn.isOngoing -> 1
-            title.isNotBlank() || text.isNotBlank() -> 5
-            else -> 2
-        }
+    private fun publishAuraEvent(sbn: StatusBarNotification) {
+        // The existing app preference is the owner's capture switch. AURA's V2
+        // baseline deliberately exports metadata only; message text stays local.
+        if (!com.agent.ultra.ui.UltraPrefs.captureNotifications(this)) return
+        val policy = NotificationPrivacyPolicy.DEFAULT
+        if (!policy.shouldCaptureMetadata(sbn.packageName)) return
         val notification = org.json.JSONObject()
             .put("package", sbn.packageName)
-            .put("title", title.take(500))
-            .put("text", text.take(2000))
+            .put("category", sbn.notification.category ?: "unknown")
             .put("postTime", sbn.postTime)
             .put("ongoing", sbn.isOngoing)
         AuraRuntime.publishEvent(
@@ -75,7 +75,7 @@ class UltraNotificationService : NotificationListenerService() {
                 id = "notification:${sbn.key}:${sbn.postTime}",
                 type = AuraEventTypes.EVENT,
                 source = "android.notification",
-                priority = priority,
+                priority = if (sbn.isOngoing) 1 else 2,
                 timestampMs = sbn.postTime,
                 payload = org.json.JSONObject().put("notification", notification),
             )

@@ -31,8 +31,8 @@ This document is the authoritative engineering checklist for the V2 branch. It d
 - [x] Encrypted local durable event outbox.
 - [x] Encrypted continuity memory store.
 - [x] Notification privacy policy module.
-- [ ] Integrate privacy policy before every event enters outbox.
-- [ ] Integrate outbox with bridge: enqueue-before-send, ACK-by-event-ID, retry/recovery.
+- [x] Integrate notification privacy policy before event creation; notification text/title remain local and are not exported.
+- [x] Integrate encrypted outbox with bridge: enqueue-before-send, ACK-by-event-ID, persisted leases and reconnect/process-death recovery.
 - [ ] Device-side durable task inbox and idempotency ledger.
 - [ ] Task-scoped ActionGate with cancellation, expiry and approval binding.
 - [ ] Capability registry based on actual OS/API/permission state.
@@ -51,6 +51,12 @@ This document is the authoritative engineering checklist for the V2 branch. It d
 
 ## Known current limits
 - The Relay task ledger persists state, but pending in-memory request promises do not survive restart. It is not yet a replay-safe dispatcher.
-- The Android outbox/contracts/privacy/memory modules are not yet wired into the existing V1 runtime.
+- The Android encrypted outbox is now wired into the bridge transport, and notification export is metadata-only behind the existing capture preference. The old SharedPreferences queue remains in the source tree but is no longer used by the bridge.
+- The typed action contracts and continuity memory are still not wired into the runtime. Incoming task execution still reaches the legacy Brain path; durable device-side task inbox/idempotency and ChatGPT-only decision enforcement remain incomplete.
 - Journal has no consumer lifecycle/retention yet; its configured capacity remains a hard backpressure boundary.
-- No compile, tests, static analysis, runtime test or device test has been run for the new Relay task-store commit.
+- This integration slice has not been compiled or tested yet. No Gradle build, unit tests, lint/static analysis, runtime test or physical-device test has been run. Verification remains deliberately deferred until implementation work is complete.
+
+## Implementation log
+- Android bridge now persists outbound event/result frames in the encrypted V2 outbox before WebSocket send. It removes records only after matching Relay ACK IDs, and uses durable leases plus reconnect recovery to retry unacknowledged sends (at-least-once; not exactly-once).
+- Notification event export is gated by the existing `captureNotifications` preference and sends package/category/time/ongoing metadata only. Title/body remain local for existing on-device triggers and optional local logging.
+- No tests or APK/build actions were run as part of this implementation step.
