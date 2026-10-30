@@ -42,14 +42,32 @@ export class DurableEventJournal {
   private records: JsonRecord[];
   private readonly path: string;
   private readonly maxRecords: number;
+  private readonly maxEventBytes: number;
+  private readonly maxJournalBytes: number;
 
-  constructor(path: string, maxRecords = 10_000) {
+  constructor(
+    path: string,
+    maxRecords = 1_000,
+    maxEventBytes = 64 * 1024,
+    maxJournalBytes = 32 * 1024 * 1024,
+  ) {
     if (!path.trim()) throw new Error("AURA journal path is required");
     if (!Number.isSafeInteger(maxRecords) || maxRecords < 1) {
       throw new Error("AURA journal maxRecords must be a positive safe integer");
     }
+    if (!Number.isSafeInteger(maxEventBytes) || maxEventBytes < 1) {
+      throw new Error("AURA journal maxEventBytes must be a positive safe integer");
+    }
+    if (!Number.isSafeInteger(maxJournalBytes) || maxJournalBytes < 1) {
+      throw new Error("AURA journal maxJournalBytes must be a positive safe integer");
+    }
+    if (maxEventBytes > maxJournalBytes) {
+      throw new Error("AURA journal maxEventBytes cannot exceed maxJournalBytes");
+    }
     this.path = path;
     this.maxRecords = maxRecords;
+    this.maxEventBytes = maxEventBytes;
+    this.maxJournalBytes = maxJournalBytes;
     this.records = this.loadStrictly();
   }
 
@@ -65,7 +83,9 @@ export class DurableEventJournal {
     }
 
     const record = { ...snapshot, id, deviceId, receivedAt: Date.now() };
+    this.assertEventSize(record);
     const next = [...this.records, record];
+    this.assertJournalSize(next);
     this.persistAtomically(next);
     this.records = next;
     return { status: "accepted", id, deviceId };
@@ -87,9 +107,14 @@ export class DurableEventJournal {
 
   private loadStrictly(): JsonRecord[] {
     if (!existsSync(this.path)) return [];
+    let raw: string;
     let parsed: unknown;
     try {
-      parsed = JSON.parse(readFileSync(this.path, "utf8"));
+      raw = readFileSync(this.path, "utf8");
+      if (Buffer.byteLength(raw, "utf8") > this.maxJournalBytes) {
+        throw new Error("AURA relay journal exceeds configured byte capacity");
+      }
+      parsed = JSON.parse(raw);
     } catch (error) {
       throw new Error("AURA relay journal is unreadable; refusing to start with an empty journal", {
         cause: error,
@@ -116,8 +141,24 @@ export class DurableEventJournal {
       const key = `${deviceId}\u0000${id}`;
       if (seen.has(key)) throw new Error("AURA relay journal contains duplicate event IDs");
       seen.add(key);
-      return cloneJsonRecord(row);
+      const record = cloneJsonRecord(row);
+      this.assertEventSize(record);
+      return record;
     });
+  }
+
+  private assertEventSize(record: JsonRecord): void {
+    const serialized = JSON.stringify(record);
+    if (Buffer.byteLength(serialized, "utf8") > this.maxEventBytes) {
+      throw new Error("AURA relay event exceeds configured per-event byte capacity");
+    }
+  }
+
+  private assertJournalSize(records: JsonRecord[]): void {
+    const serialized = JSON.stringify({ schemaVersion: 1, records } satisfies JournalState);
+    if (Buffer.byteLength(serialized, "utf8") > this.maxJournalBytes) {
+      throw new Error("AURA relay journal is full; event was not accepted or discarded");
+    }
   }
 
   private persistAtomically(records: JsonRecord[]): void {
@@ -125,6 +166,9 @@ export class DurableEventJournal {
     mkdirSync(directory, { recursive: true });
     const temporaryPath = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     const serialized = JSON.stringify({ schemaVersion: 1, records } satisfies JournalState);
+    if (Buffer.byteLength(serialized, "utf8") > this.maxJournalBytes) {
+      throw new Error("AURA relay journal is full; event was not accepted or discarded");
+    }
     let fd: number | undefined;
 
     try {
