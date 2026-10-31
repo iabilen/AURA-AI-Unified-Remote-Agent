@@ -33,12 +33,14 @@ This document is the authoritative engineering checklist for the V2 branch. It d
 - [x] Notification privacy policy module.
 - [x] Integrate notification privacy policy before event creation; notification text/title remain local and are not exported.
 - [x] Integrate encrypted outbox with bridge: enqueue-before-send, ACK-by-event-ID, persisted leases and reconnect/process-death recovery.
-- [ ] Device-side durable task inbox and idempotency ledger.
+- [x] Encrypted bounded device-side task inbox with stable task ID, payload hash, duplicate detection, and crash-safe state recovery.
+- [x] Remote task ingress is isolated from the local Brain/model path; tasks are persisted but not executed without an authenticated ChatGPT decision.
 - [ ] Task-scoped ActionGate with cancellation, expiry and approval binding.
 - [ ] Capability registry based on actual OS/API/permission state.
 - [ ] Action executor adapters and post-action verification.
 - [ ] ChatGPT decision envelope validation and replay/expiry protection.
-- [ ] Runtime lifecycle integration; no parallel local-model decision path.
+- [ ] Complete authenticated ChatGPT decision gateway and safe task dispatch handshake.
+- [ ] Runtime lifecycle integration beyond durable receipt; no parallel local-model decision path.
 - [ ] Device-independent namespace/configuration and OEM/API capability adapters.
 
 ## Required verification before calling V2 release-ready
@@ -51,14 +53,15 @@ This document is the authoritative engineering checklist for the V2 branch. It d
 
 ## Known current limits
 - The Relay task ledger persists state, but pending in-memory request promises do not survive restart. It is not yet a replay-safe dispatcher.
-- The Android encrypted outbox is now wired into the bridge transport, and notification export is metadata-only behind the existing capture preference. The old SharedPreferences queue remains in the source tree but is no longer used by the bridge.
-- The typed action contracts and continuity memory are still not wired into the runtime. Incoming task execution still reaches the legacy Brain path; durable device-side task inbox/idempotency and ChatGPT-only decision enforcement remain incomplete.
+- The Android encrypted outbox is wired into bridge transport; notification export is metadata-only behind the existing capture preference.
+- Android task ingress now persists bounded, AES-GCM encrypted records using an Android Keystore key. Same-ID/same-payload deliveries are deduplicated; same-ID/different-payload deliveries fail closed. A RUNNING task discovered after restart becomes UNKNOWN_AFTER_CRASH and is never auto-replayed.
+- Remote tasks no longer enter the legacy local Brain/model loop. They remain stored in RECEIVED state until the authenticated ChatGPT decision gateway and task-scoped authorization/dispatch path are implemented.
+- The typed action contracts and continuity memory are not yet fully wired into the action runtime.
 - Journal consumer lifecycle is available through authenticated MCP tools. Its configured capacity remains a hard backpressure boundary; retention cleanup is explicit, not automatic.
-- This integration slice has not been compiled or tested yet. No Gradle build, unit tests, lint/static analysis, runtime test or physical-device test has been run. Verification remains deliberately deferred until implementation work is complete.
+- This integration slice has not been compiled or tested. No Gradle build, unit tests, lint/static analysis, runtime test or physical-device test has been run. Verification remains deliberately deferred until implementation work is complete.
 
 ## Implementation log
-- Android bridge now persists outbound event/result frames in the encrypted V2 outbox before WebSocket send. It removes records only after matching Relay ACK IDs, and uses durable leases plus reconnect recovery to retry unacknowledged sends (at-least-once; not exactly-once).
+- Android bridge persists outbound event/result frames in the encrypted V2 outbox before WebSocket send. It removes records only after matching Relay ACK IDs and uses durable leases plus reconnect recovery to retry unacknowledged sends (at-least-once; not exactly-once).
 - Notification event export is gated by the existing `captureNotifications` preference and sends package/category/time/ongoing metadata only. Title/body remain local for existing on-device triggers and optional local logging.
-- No tests or APK/build actions were run as part of this implementation step.
-
-- Relay exposes `aura_claim_events`, `aura_ack_event`, `aura_release_event`, and `aura_prune_consumed_events`. Lease claims are persisted before delivery, ACK is bound to consumer/device/event IDs and an unexpired lease, and pruning can remove only consumed rows after at least 24 hours.
+- Relay exposes `aura_claim_events`, `aura_ack_event`, `aura_release_event`, and `aura_prune_consumed_events`. Lease claims are persisted before delivery; ACK is bound to consumer/device/event IDs and an unexpired lease; pruning removes only consumed rows after at least 24 hours.
+- Android runtime persists remote task frames before reporting local receipt and never routes those tasks to the local Brain. No tests or APK/build actions were run.
